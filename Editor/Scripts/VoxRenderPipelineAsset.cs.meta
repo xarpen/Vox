@@ -1,0 +1,21 @@
+fileFormatVersion: 2
+guid: f757b792c2797024aa5640d576b5a2ad
+MonoImporter:
+  externalObjects: {}
+  serializedVersion: 2
+  defaultReferences:
+  - diffuseShader: {fileID: -6465566751694194690, guid: 64a311141500a52498d6f2b01bd550be,
+      type: 3}
+  - metalShader: {fileID: -6465566751694194690, guid: 650bf6d4685c0ad469dd285387078742,
+      type: 3}
+  - metalCombinedShader: {fileID: -6465566751694194690, guid: eab6b80b5f44b13409f5ef8be3112dee,
+      type: 3}
+  - emitShader: {fileID: -6465566751694194690, guid: bf06417a5a6c72345abee6e892b95923,
+      type: 3}
+  - glassShader: {fileID: -6465566751694194690, guid: c1e61e00d467ce54585326e5b37ea872,
+      type: 3}
+  executionOrder: 0
+  icon: {instanceID: 0}
+  userData: 
+  assetBundleName: 
+  assetBundleVariant: 
