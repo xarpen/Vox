@@ -3,5 +3,6 @@
   "displayName": "Vox",
   "version": "1.0.0",
   "unity": "2022.2",
-  "author": "Fluorite"
+  "author": "Fluorite",
+  "type": "fluorite.package"
 }
