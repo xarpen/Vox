@@ -1,13 +1,19 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.IO;
-using System.Linq;
 using UnityEditor;
 using UnityEditor.AssetImporters;
 using UnityEngine;
+#if PACKAGE_TRIINSPECTOR
+using TriInspector;
+#endif
 
 namespace Fluorite.Vox.Editor
 {
+#if PACKAGE_TRIINSPECTOR
+    [DeclareTabGroup("Tab")]
+    [DeclareHorizontalGroup("Collider")]
+#endif
     [ScriptedImporter(1, "vox")]
     public partial class VoxImporter : ScriptedImporter
     {
@@ -15,33 +21,46 @@ namespace Fluorite.Vox.Editor
         {
             None,
             Default,
-            BakeFlatSurfaces
+            BakeEdgeToTexture
         }
 
         #region Fields
-        [SerializeField]
-        Generator generator = new();
-
-        static VoxRenderPipelineAsset pipelineAsset;
+#if PACKAGE_TRIINSPECTOR
+        [GroupNext("Tab"), Tab("Model")]
+#endif
+        public float scaleFactor = 1;
+        public StaticEditorFlags staticFlags = (StaticEditorFlags)byte.MaxValue;
+        public int baseLayer;
+#if PACKAGE_TRIINSPECTOR
+        [GroupNext("Tab"), Tab("Collider")]
+#endif
+        public bool generateColliders = true;
+#if PACKAGE_TRIINSPECTOR
+        [EnableIf(nameof(generateColliders))]
+#endif
+        public bool convex;
+#if PACKAGE_TRIINSPECTOR
+        [GroupNext("Tab"), Tab("Material")]
+#endif
+        public ImportMaterialType importMaterials = ImportMaterialType.Default;
         #endregion
 
         #region Callbacks
-        public static Action<VoxImporter, AssetImportContext> OnImportBegin { get; set; }
-        public static Action<VoxImporter, AssetImportContext> OnImportEnd { get; set; }
+        public static Action<VoxImporter, AssetImportContext> OnPreprocess { get; set; }
+        public static Action<VoxImporter, AssetImportContext> OnPostprocess { get; set; }
         #endregion
 
         #region Methods
         public override void OnImportAsset(AssetImportContext context)
         {
-            OnImportBegin?.Invoke(this, context);
-
-            pipelineAsset = AssetDatabase.FindAssets($"t: {nameof(VoxRenderPipelineAsset)}").Select(x => AssetDatabase.LoadAssetAtPath<VoxRenderPipelineAsset>(AssetDatabase.GUIDToAssetPath(x))).FirstOrDefault() ?? ScriptableObject.CreateInstance<VoxRenderPipelineAsset>();
+            OnPreprocess?.Invoke(this, context);
 
             string assetPath = context.assetPath;
             string name = Path.GetFileNameWithoutExtension(assetPath);
             Vox vox = new(assetPath);
             Chunk main = vox.Main;
 
+            Generator generator = new(scaleFactor, staticFlags, baseLayer, generateColliders, convex, importMaterials);
             (List<Shape> shapes, GameObject gameObject) = generator.CreateAssets(main, name);
 
             List<Texture> textures = new();
@@ -65,7 +84,7 @@ namespace Fluorite.Vox.Editor
             context.AddObjectToAsset(name, gameObject);
             context.SetMainObject(gameObject);
 
-            OnImportEnd?.Invoke(this, context);
+            OnPostprocess?.Invoke(this, context);
         }
         #endregion
     }

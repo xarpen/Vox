@@ -205,8 +205,8 @@ namespace Fluorite.Vox.Editor
         protected static string WriteInt(int value) => value.ToString(CultureInfo.InvariantCulture);
         protected static float ReadFloat(string value) => float.Parse(value, CultureInfo.InvariantCulture);
         protected static string WriteFloat(float value) => value.ToString(CultureInfo.InvariantCulture);
-        protected static Vector3 ReadVector3(string value) { float[] array = Array.ConvertAll(value.Split(' '), ReadFloat); return new Vector3(array[0], array[1], array[2]); }
-        protected static string WriteVector3(Vector3 value) => $"{value.x} {value.y} {value.z}";
+        protected static Vector3 ReadVector3(string value) { float[] array = Array.ConvertAll(value.Split(' '), ReadFloat); return new Vector3(array[0], array[2], array[1]); }
+        protected static string WriteVector3(Vector3 value) => $"{value.x} {value.z} {value.y}";
         protected static Vector2 ReadVector2(string value) { float[] array = Array.ConvertAll(value.Split(' '), ReadFloat); return new Vector2(array[0], array[1]); }
         protected static string WriteVector2(Vector2 value) => $"{value.x} {value.y}";
         protected static Color32 ReadColor32(string value) { byte[] array = Array.ConvertAll(value.Split(' '), byte.Parse); return new Color32(array[0], array[1], array[2], 255); }
@@ -424,30 +424,6 @@ namespace Fluorite.Vox.Editor
 
     public class TransformChunk : NChunk
     {
-        [Flags]
-        enum _R
-        {
-            r0000 = 0,
-            r0001 = 1,
-            r0010 = 2,
-            r0011 = 3,
-            r0100 = 4,
-            r0101 = 5,
-            r0110 = 6,
-            r0111 = 7,
-            r1000 = 8,
-            r1001 = 9,
-            r1010 = 10,
-            r1011 = 11,
-            r1100 = 12,
-            r1101 = 13,
-            r1110 = 14,
-            r1111 = 15,
-            ScaleX = 16,
-            ScaleZ = 32,
-            ScaleY = 64,
-        }
-
         const string t = "_t";
         const string r = "_r";
 
@@ -458,7 +434,7 @@ namespace Fluorite.Vox.Editor
             {
                 int size = 5 * sizeof(int);
                 if (Position != Vector3.zero) size += KeyValueSize(t, WriteVector3(Position));
-                if (Euler != Vector3.zero || Scale != Vector3.one) size += KeyValueSize(r, Write_r());
+                if (Orientation != default) size += KeyValueSize(r, Write_r());
                 return base.NumBytes + size;
             }
         }
@@ -467,8 +443,7 @@ namespace Fluorite.Vox.Editor
         public int Layer { get; private set; }
         public int Reserved { get; private set; }
         public Vector3 Position { get; private set; }
-        public Vector3 Euler { get; private set; }
-        public Vector3 Scale { get; private set; }
+        public Matrix4x4 Orientation { get; private set; }
         #endregion
 
         #region Constructors
@@ -508,57 +483,99 @@ namespace Fluorite.Vox.Editor
             writer.Write(Flag);
             writer.Write(Layer);
             writer.Write(Reserved);
-            writer.Write((Position != Vector3.zero ? 1 : 0) + (Euler != Vector3.zero || Scale != Vector3.one ? 1 : 0));
-            if (Euler != Vector3.zero || Scale != Vector3.one) WriteKeyValue(writer, r, Write_r());
+            writer.Write((Position != Vector3.zero ? 1 : 0) + (Orientation != default ? 1 : 0));
+            if (Orientation != default) WriteKeyValue(writer, r, Write_r());
             if (Position != Vector3.zero) WriteKeyValue(writer, t, WriteVector3(Position));
         }
         #endregion
 
         #region Support Methods
+        /* This is ridiculous and I love it
+            (c) ROTATION type
+
+            store a row-major rotation in the bits of a byte
+
+            for example :
+            R =
+             0  1  0
+             0  0 -1
+            -1  0  0
+            ==>
+            unsigned char _r = (1 << 0) | (2 << 2) | (0 << 4) | (1 << 5) | (1 << 6)
+
+            bit | value
+            0-1 : 1 : index of the non-zero entry in the first row
+            2-3 : 2 : index of the non-zero entry in the second row
+            4   : 0 : the sign in the first row (0 : positive; 1 : negative)
+            5   : 1 : the sign in the second row (0 : positive; 1 : negative)
+            6   : 1 : the sign in the third row (0 : positive; 1 : negative)
+         */
         void Read_r(string value)
         {
-            _R _r = (_R)ReadInt(value);
-            Vector3 scale = Vector3.one;
-            if ((_r & _R.ScaleX) == 0) scale.x = -1; else _r -= _R.ScaleX;
-            if ((_r & _R.ScaleY) == 0) scale.y = -1; else _r -= _R.ScaleY;
-            if ((_r & _R.ScaleZ) == 0) scale.z = -1; else _r -= _R.ScaleZ;
-            if (_r == _R.r0000) Debug.LogWarning($"[{nameof(Vox)}] Unknown rotation _r={value} on {Name}.");
-            if (_r == _R.r0001) Euler = new Vector3(180, 0, 90);
-            if (_r == _R.r0010) { Euler = new Vector3(90, 90, 0); scale *= -1; }
-            if (_r == _R.r0011) Debug.LogWarning($"[{nameof(Vox)}] Unknown rotation _r={value} on {Name}.");
-            if (_r == _R.r0100) { Euler = new Vector3(0, 0, 0); scale *= -1; }
-            if (_r == _R.r0101) Debug.LogWarning($"[{nameof(Vox)}] Unknown rotation _r={value} on {Name}.");
-            if (_r == _R.r0110) Euler = new Vector3(180, -90, 0);
-            if (_r == _R.r0111) Debug.LogWarning($"[{nameof(Vox)}] Unknown rotation _r={value} on {Name}.");
-            if (_r == _R.r1000) Euler = new Vector3(-90, -180, 0);
-            if (_r == _R.r1001) { Euler = new Vector3(-90, 0, -90); scale *= -1; }
-            if (_r == _R.r1010) Debug.LogWarning($"[{nameof(Vox)}] Unknown rotation _r={value} on {Name}.");
-            if (_r == _R.r1011) Debug.LogWarning($"[{nameof(Vox)}] Unknown rotation _r={value} on {Name}.");
-            if (_r == _R.r1100) Debug.LogWarning($"[{nameof(Vox)}] Unknown rotation _r={value} on {Name}.");
-            if (_r == _R.r1101) Debug.LogWarning($"[{nameof(Vox)}] Unknown rotation _r={value} on {Name}.");
-            if (_r == _R.r1110) Debug.LogWarning($"[{nameof(Vox)}] Unknown rotation _r={value} on {Name}.");
-            if (_r == _R.r1111) Debug.LogWarning($"[{nameof(Vox)}] Unknown rotation _r={value} on {Name}.");
-            Scale = scale;
+            Matrix4x4 ReadRotation(byte rotationByte)
+            {
+                int column1Index = rotationByte & 3;
+                int column2Index = (rotationByte >> 2) & 3;
+                int column3Index = 3 - column1Index - column2Index;
+                int row1Sign = (rotationByte >> 4) & 1;
+                int row2Sign = (rotationByte >> 5) & 1;
+                int row3Sign = (rotationByte >> 6) & 1;
+                int value1 = row1Sign == 0 ? 1 : -1;
+                int value2 = row2Sign == 0 ? 1 : -1;
+                int value3 = row3Sign == 0 ? 1 : -1;
+
+                Matrix4x4 orientation = Matrix4x4.zero;
+                orientation[column1Index, 0] = value1;
+                orientation[column2Index, 1] = value2;
+                orientation[column3Index, 2] = value3;
+                orientation[3, 3] = 1;
+
+                Vector4 r1 = orientation.GetRow(1);
+                Vector4 r2 = orientation.GetRow(2);
+                orientation.SetRow(1, r2);
+                orientation.SetRow(2, r1);
+                orientation = orientation.transpose;
+                r1 = orientation.GetRow(1);
+                r2 = orientation.GetRow(2);
+                orientation.SetRow(1, r2);
+                orientation.SetRow(2, r1);
+
+                return orientation;
+            }
+
+            Orientation = ReadRotation((byte)ReadInt(value));
         }
         string Write_r()
         {
-            _R _r = 0;
-            if (Euler == new Vector3(180, 0, 90)) _r = _R.r0001;
-            if (Euler == new Vector3(90, 90, 0)) _r = _R.r0010;
-            if (Euler == new Vector3(0, 0, 0)) _r = _R.r0100;
-            if (Euler == new Vector3(180, -90, 0)) _r = _R.r0110;
-            if (Euler == new Vector3(-90, -180, 0)) _r = _R.r1000;
-            if (Euler == new Vector3(-90, 0, -90)) _r = _R.r1001;
+            byte WriteRotation(Matrix4x4 orientation)
+            {
+                Vector4 r1 = orientation.GetRow(1);
+                Vector4 r2 = orientation.GetRow(2);
+                orientation.SetRow(1, r2);
+                orientation.SetRow(2, r1);
+                orientation = orientation.transpose;
+                r1 = orientation.GetRow(1);
+                r2 = orientation.GetRow(2);
+                orientation.SetRow(1, r2);
+                orientation.SetRow(2, r1);
 
-            Vector3 originalScale = Scale;
-            if (Euler == new Vector3(90, 90, 0)) originalScale *= -1;
-            if (Euler == new Vector3(0, 0, 0)) originalScale *= -1;
-            if (Euler == new Vector3(-90, 0, -90)) originalScale *= -1;
+                Vector4 c1 = orientation.GetColumn(0);
+                Vector4 c2 = orientation.GetColumn(1);
+                Vector4 c3 = orientation.GetColumn(2);
 
-            if (originalScale.x > 0) _r |= _R.ScaleX;
-            if (originalScale.y > 0) _r |= _R.ScaleY;
-            if (originalScale.z > 0) _r |= _R.ScaleZ;
-            return WriteInt((int)_r);
+                int column1Index = c1[0] != 0 ? 0 : c1[1] != 0 ? 1 : c1[2] != 0 ? 2 : 3;
+                int column2Index = c2[0] != 0 ? 0 : c2[1] != 0 ? 1 : c2[2] != 0 ? 2 : 3;
+                float value1 = c1[0] + c1[1] + c1[2];
+                float value2 = c2[0] + c2[1] + c2[2];
+                float value3 = c3[0] + c3[1] + c3[2];
+                int row1Sign = value1 > 0 ? 0 : 1;
+                int row2Sign = value2 > 0 ? 0 : 1;
+                int row3Sign = value3 > 0 ? 0 : 1;
+
+                return (byte)((column1Index & 3) | (column2Index & 3) << 2 | row1Sign << 4 | row2Sign << 5 | row3Sign << 6);
+            }
+
+            return WriteInt(WriteRotation(Orientation));
         }
         #endregion
     }
@@ -613,6 +630,7 @@ namespace Fluorite.Vox.Editor
     {
         const string name = "_name";
         const string hidden = "_name";
+        const string color = "_color";
 
         #region Fields
         byte[] bytes;
@@ -632,6 +650,7 @@ namespace Fluorite.Vox.Editor
         public int Index { get; private set; }
         public string Name { get; private set; }
         public bool Hidden { get; private set; }
+        public Color32 Color { get; private set; }
         #endregion
 
         #region Methods
@@ -645,6 +664,7 @@ namespace Fluorite.Vox.Editor
                 KeyValuePair<string, string> keyValue = ReadKeyValue(reader);
                 if (keyValue.Key == name) Name = keyValue.Value;
                 else if (keyValue.Key == hidden) Hidden = ReadInt(keyValue.Value) != 0;
+                else if (keyValue.Key == color) Color = ReadColor32(keyValue.Value);
                 else throw new ArgumentOutOfRangeException($"Invalid key={keyValue.Key} value={keyValue.Value}");
             }
 
@@ -656,6 +676,7 @@ namespace Fluorite.Vox.Editor
             writer.Write(Count(Name, string.Empty) + Count(Hidden, false));
             if (Name != string.Empty) WriteKeyValue(writer, name, Name);
             if (Hidden) WriteKeyValue(writer, hidden, one);
+            if (Color.GetHashCode() != default(Color32).GetHashCode()) WriteKeyValue(writer, color, WriteColor32(Color));
 
             writer.Write(bytes);
         }
@@ -671,6 +692,7 @@ namespace Fluorite.Vox.Editor
         const string emit = "_emit";
         const string rough = "_rough";
         const string ior = "_ior";
+        const string ri = "_ri";
         const string sp = "_sp";
         const string emission = "_emission";
         const string flux = "_flux";
@@ -692,6 +714,7 @@ namespace Fluorite.Vox.Editor
                 if (MaterialType == MaterialType.Emission) size += KeyValueSize(type, emit);
                 if (Roughness != 0) size += KeyValueSize(rough, WriteFloat(Roughness));
                 if (IOR != 0) size += KeyValueSize(ior, WriteFloat(IOR));
+                if (RI != 0) size += KeyValueSize(ri, WriteFloat(RI));
                 if (Specular != 0) size += KeyValueSize(sp, WriteFloat(Specular));
                 if (Metal != 0) size += KeyValueSize(metal, WriteFloat(Metal));
                 if (Emission != 0) size += KeyValueSize(emission, WriteFloat(Emission));
@@ -707,6 +730,7 @@ namespace Fluorite.Vox.Editor
         public MaterialType MaterialType { get; private set; }
         public float Roughness { get; private set; }
         public float IOR { get; private set; }
+        public float RI { get; private set; }
         public float Specular { get; private set; }
         public float Metal { get; private set; }
         public float Emission { get; private set; }
@@ -761,6 +785,7 @@ namespace Fluorite.Vox.Editor
                     }
                     else if (keyValue.Key == rough) Roughness = ReadFloat(keyValue.Value);
                     else if (keyValue.Key == ior) IOR = ReadFloat(keyValue.Value);
+                    else if (keyValue.Key == ri) RI = ReadFloat(keyValue.Value);
                     else if (keyValue.Key == sp) Specular = ReadFloat(keyValue.Value);
                     else if (keyValue.Key == metal) Metal = ReadFloat(keyValue.Value);
                     else if (keyValue.Key == emit) Emission = ReadFloat(keyValue.Value);
@@ -784,6 +809,7 @@ namespace Fluorite.Vox.Editor
             if (MaterialType == MaterialType.Emission) WriteKeyValue(writer, type, emit);
             if (Roughness != 0) WriteKeyValue(writer, rough, WriteFloat(Roughness));
             if (IOR != 0) WriteKeyValue(writer, ior, WriteFloat(IOR));
+            if (RI != 0) WriteKeyValue(writer, ri, WriteFloat(RI));
             if (Specular != 0) WriteKeyValue(writer, sp, WriteFloat(Specular));
             if (Metal != 0) WriteKeyValue(writer, metal, WriteFloat(Metal));
             if (Emission != 0) WriteKeyValue(writer, emit, WriteFloat(Emission));

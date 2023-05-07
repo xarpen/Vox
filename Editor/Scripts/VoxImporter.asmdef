@@ -1,7 +1,9 @@
 {
     "name": "VoxImporter",
     "rootNamespace": "",
-    "references": [],
+    "references": [
+        "TriInspector"
+    ],
     "includePlatforms": [
         "Editor"
     ],

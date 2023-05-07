@@ -12,15 +12,18 @@ namespace Fluorite.Vox.Editor
 {
     public partial class VoxImporter
     {
-        internal record Shape(Mesh Mesh, Texture[] Textures, Material[] Materials);
+        // ReSharper disable once NotAccessedPositionalProperty.Local
+        record Shape(Mesh Mesh, Texture[] Textures, Material[] Materials);
 
-        [Serializable]
-        public class Generator
+        class Generator
         {
             const int maxVoxels = XyziChunk.maxVoxels;
             const int maxColors = RgbaChunk.maxColors;
 
-            internal class ShapeGenerator
+            static Lazy<VoxRenderPipelineAsset> PipelineAssetLazy = new(() => AssetDatabase.FindAssets($"t: {nameof(VoxRenderPipelineAsset)}").Select(x => AssetDatabase.LoadAssetAtPath<VoxRenderPipelineAsset>(AssetDatabase.GUIDToAssetPath(x))).FirstOrDefault() ?? ScriptableObject.CreateInstance<VoxRenderPipelineAsset>());
+            static VoxRenderPipelineAsset PipelineAsset => PipelineAssetLazy.Value;
+
+            class ShapeGenerator
             {
                 record IndexedTextures (int Index, Texture2D Texture, Texture2D Mask);
 
@@ -105,7 +108,7 @@ namespace Fluorite.Vox.Editor
                     return index != 0 ? materialType[index - 1] : MaterialType.Diffuse;
                 }
                 static bool ImportMaterials(ImportMaterialType importMaterials) => importMaterials > ImportMaterialType.None;
-                static bool ImportCombinedMaterials(ImportMaterialType importMaterials) => importMaterials == ImportMaterialType.BakeFlatSurfaces;
+                static bool ImportCombinedMaterials(ImportMaterialType importMaterials) => importMaterials == ImportMaterialType.BakeEdgeToTexture;
 
                 void AddSide(Vector3Int size, int[] dir, int limit, Vector3Int normal, Vector3 offset, bool inverse, float scaleFactor, ImportMaterialType importMaterials)
                 {
@@ -311,7 +314,7 @@ namespace Fluorite.Vox.Editor
                                     voxelsInWidth[dir[1]] = sameMaterialNoLimitSize.x;
                                     voxelsInHeight[dir[2]] = sameMaterialNoLimitSize.y;
 
-                                    combinedMattersTextures[(int)materialType].Add(new IndexedTextures(index, VoxRenderPipelineAsset.CreateCombinedBaseMap(xyz, dir, voxelsInWidth[dir[1]], voxelsInHeight[dir[2]], ColorAt), pipelineAsset.CreateCombinedMask(materialType, xyz, dir, voxelsInWidth[dir[1]], voxelsInHeight[dir[2]], MaterialAt)));
+                                    combinedMattersTextures[(int)materialType].Add(new IndexedTextures(index, VoxRenderPipelineAsset.CreateCombinedBaseMap(xyz, dir, voxelsInWidth[dir[1]], voxelsInHeight[dir[2]], ColorAt), PipelineAsset.CreateCombinedMask(materialType, xyz, dir, voxelsInWidth[dir[1]], voxelsInHeight[dir[2]], MaterialAt)));
 
                                     index = AddEdge(index, xyz, vox, materialType, true, voxelsInWidth, voxelsInHeight);
                                 }
@@ -320,7 +323,7 @@ namespace Fluorite.Vox.Editor
                                     voxelsInWidth[dir[1]] = sameMaterialSize.x;
                                     voxelsInHeight[dir[2]] = sameMaterialSize.y;
 
-                                    combinedMattersTextures[(int)materialType].Add(new IndexedTextures(index, VoxRenderPipelineAsset.CreateCombinedBaseMap(xyz, dir, voxelsInWidth[dir[1]], voxelsInHeight[dir[2]], ColorAt), pipelineAsset.CreateCombinedMask(materialType, xyz, dir, voxelsInWidth[dir[1]], voxelsInHeight[dir[2]], MaterialAt)));
+                                    combinedMattersTextures[(int)materialType].Add(new IndexedTextures(index, VoxRenderPipelineAsset.CreateCombinedBaseMap(xyz, dir, voxelsInWidth[dir[1]], voxelsInHeight[dir[2]], ColorAt), PipelineAsset.CreateCombinedMask(materialType, xyz, dir, voxelsInWidth[dir[1]], voxelsInHeight[dir[2]], MaterialAt)));
 
                                     index = AddEdge(index, xyz, vox, materialType, true, voxelsInWidth, voxelsInHeight);
                                 }
@@ -436,7 +439,7 @@ namespace Fluorite.Vox.Editor
 
                         shapeTextures[textureIndex++] = texture;
                         if (i > 0 && mask) shapeTextures[textureIndex++] = mask;
-                        shapeMaterials[materialIndex++] = pipelineAsset.CreateCombinedMaterial((MaterialType)i, texture, mask);
+                        shapeMaterials[materialIndex++] = PipelineAsset.CreateCombinedMaterial((MaterialType)i, texture, mask);
                     }
 
                     for (int i = 0; i < mattersTriangles.Length; ++i)
@@ -449,13 +452,24 @@ namespace Fluorite.Vox.Editor
             }
 
             #region Fields
-            [SerializeField] Vector3 offset;
-            [SerializeField] float scaleFactor = 0.025f;
-            [SerializeField] bool generateColliders = true;
-            [SerializeField] bool convex;
-            [SerializeField] StaticEditorFlags staticFlags;
-            [SerializeField] int layer = -1;
-            [SerializeField] ImportMaterialType importMaterials = ImportMaterialType.Default;
+            float scaleFactor;
+            StaticEditorFlags staticFlags;
+            int baseLayer;
+            bool generateColliders;
+            bool convex;
+            ImportMaterialType importMaterials;
+            #endregion
+
+            #region Constructors
+            internal Generator(float scaleFactor, StaticEditorFlags staticFlags, int baseLayer, bool generateColliders, bool convex, ImportMaterialType importMaterials)
+            {
+                this.scaleFactor = scaleFactor;
+                this.generateColliders = generateColliders;
+                this.convex = convex;
+                this.staticFlags = staticFlags;
+                this.baseLayer = baseLayer;
+                this.importMaterials = importMaterials;
+            }
             #endregion
 
             #region Methods
@@ -463,8 +477,8 @@ namespace Fluorite.Vox.Editor
             {
                 Material CreatePaletteMaterial(Texture palette)
                 {
-                    Material material = new(pipelineAsset.GetShader(MaterialType.Diffuse, true)) { name = "Default" };
-                    material.SetTexture(pipelineAsset.BaseMapProperty, palette);
+                    Material material = new(PipelineAsset.GetShader(MaterialType.Diffuse, true)) { name = "Default" };
+                    material.SetTexture(PipelineAsset.BaseMapProperty, palette);
                     return material;
                 }
 
@@ -482,7 +496,7 @@ namespace Fluorite.Vox.Editor
                     byte index = (byte)(chunk.Index - 1);
                     Color color = colors[index];
                     if (linearColorSpace) color = color.linear;
-                    materials[index] = pipelineAsset.CreateMaterial(index, chunk.MaterialType, color, chunk.Roughness, chunk.IOR, chunk.Specular, chunk.Metal, chunk.Emission, chunk.Flux, chunk.LowDynamicRange, chunk.Transparency);
+                    materials[index] = PipelineAsset.CreateMaterial(index, chunk.MaterialType, color, chunk.Roughness, chunk.IOR, chunk.Specular, chunk.Metal, chunk.Emission, chunk.Flux, chunk.LowDynamicRange, chunk.Transparency);
                     materialType[index] = chunk.MaterialType;
                 }
 
@@ -536,89 +550,73 @@ namespace Fluorite.Vox.Editor
                     }
                 }
 
-                return (shapes, CreateGameObject(transform, nobjects, shapes));
+                return (shapes, CreateGameObject(transform, nobjects, shapes, default));
             }
             #endregion
 
             #region Support Methods
-            GameObject CreateGameObject(string name, Vector3 position, Vector3 euler, Vector3 scale, int transformLayer, Mesh mesh = default, Material[] materials = default)
+            GameObject CreateGameObject(string name, Vector3 position, Matrix4x4 orientation, int transformLayer, Transform parent)
             {
                 GameObject gameObject = new(name ?? "Shape");
-                gameObject.transform.Rotate(0, 0, -euler.y, Space.World);
-                gameObject.transform.Rotate(0, -euler.z, 0, Space.World);
-                gameObject.transform.Rotate(-euler.x, 0, 0, Space.World);
+                gameObject.transform.SetParent(parent);
                 GameObjectUtility.SetStaticEditorFlags(gameObject, staticFlags);
 
-                Vector3 globalScale = Vector3.one;
-                Vector3 right = gameObject.transform.right;
-                Vector3 up = gameObject.transform.up;
-                Vector3 forward = gameObject.transform.forward;
-
-                if (scale.x < 0)
-                {
-                    float r = Vector3.Angle(Vector3.right, right);
-                    float u = Vector3.Angle(Vector3.right, up);
-                    float f = Vector3.Angle(Vector3.right, forward);
-
-                    if (r is < 30 or > 150) globalScale.x = -1;
-                    if (u is < 30 or > 150) globalScale.y = -1;
-                    if (f is < 30 or > 150) globalScale.z = -1;
-                }
-                if (scale.y < 0)
-                {
-                    float r = Vector3.Angle(Vector3.up, right);
-                    float u = Vector3.Angle(Vector3.up, up);
-                    float f = Vector3.Angle(Vector3.up, forward);
-
-                    if (r is < 30 or > 150) globalScale.x = -1;
-                    if (u is < 30 or > 150) globalScale.y = -1;
-                    if (f is < 30 or > 150) globalScale.z = -1;
-                }
-                if (scale.z < 0)
-                {
-                    float r = Vector3.Angle(Vector3.forward, right);
-                    float u = Vector3.Angle(Vector3.forward, up);
-                    float f = Vector3.Angle(Vector3.forward, forward);
-
-                    if (r is < 30 or > 150) globalScale.x = -1;
-                    if (u is < 30 or > 150) globalScale.y = -1;
-                    if (f is < 30 or > 150) globalScale.z = -1;
-                }
-
-                gameObject.transform.localScale = globalScale;
-                gameObject.transform.position = new Vector3(position.x + offset.x, position.z + offset.y, position.y + offset.z) * scaleFactor;
-
-                if (layer >= 0) gameObject.layer = layer + transformLayer;
-                if (mesh) gameObject.AddComponent<MeshFilter>().sharedMesh = mesh;
-                if (materials != default) gameObject.AddComponent<MeshRenderer>().sharedMaterials = materials;
-                if (!mesh || !generateColliders) return gameObject;
-
-                MeshCollider collider = gameObject.AddComponent<MeshCollider>();
-                collider.sharedMesh = mesh;
-                collider.convex = convex;
+                gameObject.transform.localPosition = position * scaleFactor;
+                if (orientation != default) gameObject.transform.rotation = orientation.rotation;
+                if (baseLayer >= 0 && transformLayer >= 0) gameObject.layer = baseLayer + transformLayer;
 
                 return gameObject;
             }
-            GameObject CreateGameObject(TransformChunk transform, IReadOnlyList<Chunk> objects, IReadOnlyList<Shape> shapes)
+            GameObject CreateGameObject(string name, Vector3 position, Matrix4x4 orientation, int transformLayer, Mesh mesh, Material[] materials, Transform parent)
             {
-                if (objects[transform.Reference] is GroupChunk group)
+                GameObject gameObject = CreateGameObject(name, parent ? position : Vector3.zero, parent ? orientation : Matrix4x4.identity, transformLayer, parent);
+
+                gameObject.AddComponent<MeshFilter>().sharedMesh = mesh;
+                gameObject.AddComponent<MeshRenderer>().sharedMaterials = materials;
+
+                if (generateColliders)
                 {
-                    if (transform.Position == default && transform.Euler == default && transform.Scale == Vector3.one && group.children.Length == 1)
-                        return CreateGameObject((TransformChunk)objects[group.children[0]], objects, shapes);
-
-                    GameObject gameObject = CreateGameObject(transform.Name, transform.Position, transform.Euler, transform.Scale, transform.Layer);
-                    foreach (int index in group.children)
-                        CreateGameObject((TransformChunk)objects[index], objects, shapes).transform.SetParent(gameObject.transform, false);
-
-                    return gameObject;
+                    MeshCollider collider = gameObject.AddComponent<MeshCollider>();
+                    collider.sharedMesh = mesh;
+                    collider.convex = convex;
                 }
 
-                if (objects[transform.Reference] is ShapeChunk shape)
+                if (!parent)
                 {
-                    return CreateGameObject(transform.Name, transform.Position, transform.Euler, transform.Scale, transform.Layer, shapes[shape.ShapeIndex].Mesh, shapes[shape.ShapeIndex].Materials);
+                    int index = 0;
+                    Vector3 offset = position * scaleFactor;
+                    Vector3[] vertices = mesh.vertices;
+                    Quaternion rotation = orientation.rotation;
+                    foreach (Vector3 value in vertices) vertices[index++] = rotation * value + offset;
+                    mesh.vertices = vertices;
+                    mesh.RecalculateBounds();
                 }
 
-                throw new NotSupportedException();
+                return gameObject;
+            }
+            GameObject CreateGameObject(TransformChunk transform, IReadOnlyList<Chunk> objects, IReadOnlyList<Shape> shapes, Transform parent)
+            {
+                while (true)
+                {
+                    if (objects[transform.Reference] is GroupChunk group)
+                    {
+                        if (transform.Position == default && transform.Orientation == default && group.children.Length == 1)
+                        {
+                            transform = (TransformChunk)objects[group.children[0]];
+                            continue;
+                        }
+
+                        GameObject gameObject = CreateGameObject(transform.Name, transform.Position, transform.Orientation, transform.Layer, parent);
+                        foreach (int index in group.children) CreateGameObject((TransformChunk)objects[index], objects, shapes, gameObject.transform);
+                        return gameObject;
+                    }
+                    if (objects[transform.Reference] is ShapeChunk shape)
+                    {
+                        return CreateGameObject(transform.Name, transform.Position, transform.Orientation, transform.Layer, shapes[shape.ShapeIndex].Mesh, shapes[shape.ShapeIndex].Materials, parent);
+                    }
+
+                    throw new NotSupportedException();
+                }
             }
             #endregion
         }
