@@ -583,12 +583,14 @@ namespace Fluorite.Vox.Editor
 
                 if (!parent)
                 {
-                    int index = 0;
                     Vector3 offset = position * scaleFactor;
                     Vector3[] vertices = mesh.vertices;
+                    Vector3[] normals = mesh.normals;
                     Quaternion rotation = orientation.rotation;
-                    foreach (Vector3 value in vertices) vertices[index++] = rotation * value + offset;
+                    for (int i = 0; i < vertices.Length; ++i) vertices[i] = rotation * vertices[i] + offset;
+                    for (int i = 0; i < normals.Length; ++i) normals[i] = rotation * normals[i];
                     mesh.vertices = vertices;
+                    mesh.normals = normals;
                     mesh.RecalculateBounds();
                 }
 
