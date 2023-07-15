@@ -42,7 +42,8 @@ namespace Fluorite.Vox.Editor
             rDis = 1397310578,
             rObj = 1245859698,
             rCam = 1296122738,
-            Note = 1163153230
+            Note = 1163153230,
+            iMap = 1346456905
         }
 
         protected const string zero = "0";
@@ -157,6 +158,10 @@ namespace Fluorite.Vox.Editor
 
                     case Type.Note:
                         chunk = new NoteChunk();
+                        break;
+
+                    case Type.iMap:
+                        chunk = new iMapChunk();
                         break;
 
                     default:
@@ -282,7 +287,7 @@ namespace Fluorite.Vox.Editor
         public const int maxVoxels = 256;
 
         #region Fields
-        static byte[] buffer = new byte[maxVoxels * maxVoxels * maxVoxels * 4];
+        static byte[] buffer = new byte[maxVoxels * maxVoxels * maxVoxels * (Marshal.SizeOf<Color32>() / sizeof(byte))];
         #endregion
 
         #region Properties
@@ -512,6 +517,42 @@ namespace Fluorite.Vox.Editor
          */
         void Read_r(string value)
         {
+            /* To be integrated
+            public Matrix3f readRotation(int rotation)
+            {
+                Matrix3f matrix = new Matrix3f();
+
+                int firstIndex  = (rotation & 0b0011);
+                int secondIndex = (rotation & 0b1100) >> 2;
+                int[] array = {-1, -1, -1};
+                int index = 0;
+
+                array[firstIndex] = 0;
+                array[secondIndex] = 0;
+
+                for (int i = 0; i < array.length; i ++)
+                {
+                    if (array[i] == -1)
+                    {
+                        index = i;
+
+                        break;
+                    }
+                }
+
+                int thirdIndex = index;
+
+                boolean negativeFirst  = ((rotation & 0b0010000) >> 4) == 1;
+                boolean negativeSecond = ((rotation & 0b0100000) >> 5) == 1;
+                boolean negativeThird  = ((rotation & 0b1000000) >> 6) == 1;
+
+                matrix.setElement(0, firstIndex, negativeFirst ? -1 : 1);
+                matrix.setElement(1, secondIndex, negativeSecond ? -1 : 1);
+                matrix.setElement(2, thirdIndex, negativeThird ? -1 : 1);
+
+                return matrix;
+            }
+             * */
             Matrix4x4 ReadRotation(byte rotationByte)
             {
                 int column1Index = rotationByte & 3;
@@ -539,6 +580,8 @@ namespace Fluorite.Vox.Editor
                 r2 = orientation.GetRow(2);
                 orientation.SetRow(1, r2);
                 orientation.SetRow(2, r1);
+
+
 
                 return orientation;
             }
@@ -1087,6 +1130,21 @@ namespace Fluorite.Vox.Editor
     public class rCamChunk : Chunk { }
 
     public class NoteChunk : Chunk { }
+
+    public class iMapChunk : Chunk
+    {
+        public const int maxColors = RgbaChunk.maxColors;
+
+        #region Properties
+        protected override int NumBytes => maxColors * Marshal.SizeOf<int>();
+        public byte[] Index { get; private set; } = new byte[maxColors];
+        #endregion
+
+        #region Methods
+        protected override void ReadBody(BinaryReader reader) => Index = reader.ReadBytes(maxColors);
+        protected override void WriteBody(BinaryWriter writer) => writer.Write(Index);
+        #endregion
+    }
 
     public class Vox
     {

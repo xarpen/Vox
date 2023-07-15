@@ -489,13 +489,11 @@ namespace Fluorite.Vox.Editor
 
                 Material[] materials = new Material[maxColors];
                 MaterialType[] materialType = new MaterialType[maxColors];
-                bool linearColorSpace = QualitySettings.activeColorSpace == ColorSpace.Linear;
                 foreach (MaterialChunk chunk in main.Children.OfType<MaterialChunk>())
                 {
                     if (chunk.MaterialType == MaterialType.Diffuse) continue;
                     byte index = (byte)(chunk.Index - 1);
                     Color color = colors[index];
-                    if (linearColorSpace) color = color.linear;
                     materials[index] = PipelineAsset.CreateMaterial(index, chunk.MaterialType, color, chunk.Roughness, chunk.IOR, chunk.Specular, chunk.Metal, chunk.Emission, chunk.Flux, chunk.LowDynamicRange, chunk.Transparency);
                     materialType[index] = chunk.MaterialType;
                 }
