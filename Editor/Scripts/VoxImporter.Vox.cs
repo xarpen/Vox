@@ -22,6 +22,7 @@ namespace Fluorite.Vox.Editor
 
     public abstract class Chunk
     {
+        // ReSharper disable InconsistentNaming
         public enum Type
         {
             Main = 1313423693,
@@ -50,7 +51,7 @@ namespace Fluorite.Vox.Editor
         protected const string one = "1";
 
         #region Fields
-        static byte[] buffer = new byte[byte.MaxValue];
+        static readonly byte[] buffer = new byte[byte.MaxValue];
 
         int numBytes;
         int numBytesChildren;
@@ -206,15 +207,27 @@ namespace Fluorite.Vox.Editor
             writer.Write(buffer, 0, GetBytes(value));
         }
 
-        protected static float ReadInt(string value) => int.Parse(value, CultureInfo.InvariantCulture);
+        protected static int ReadInt(string value) => int.Parse(value, CultureInfo.InvariantCulture);
         protected static string WriteInt(int value) => value.ToString(CultureInfo.InvariantCulture);
         protected static float ReadFloat(string value) => float.Parse(value, CultureInfo.InvariantCulture);
         protected static string WriteFloat(float value) => value.ToString(CultureInfo.InvariantCulture);
-        protected static Vector3 ReadVector3(string value) { float[] array = Array.ConvertAll(value.Split(' '), ReadFloat); return new Vector3(array[0], array[2], array[1]); }
+        protected static Vector3 ReadVector3(string value)
+        {
+            float[] array = Array.ConvertAll(value.Split(' '), ReadFloat);
+            return new Vector3(array[0], array[2], array[1]);
+        }
         protected static string WriteVector3(Vector3 value) => $"{value.x} {value.z} {value.y}";
-        protected static Vector2 ReadVector2(string value) { float[] array = Array.ConvertAll(value.Split(' '), ReadFloat); return new Vector2(array[0], array[1]); }
+        protected static Vector2 ReadVector2(string value)
+        {
+            float[] array = Array.ConvertAll(value.Split(' '), ReadFloat);
+            return new Vector2(array[0], array[1]);
+        }
         protected static string WriteVector2(Vector2 value) => $"{value.x} {value.y}";
-        protected static Color32 ReadColor32(string value) { byte[] array = Array.ConvertAll(value.Split(' '), byte.Parse); return new Color32(array[0], array[1], array[2], 255); }
+        protected static Color32 ReadColor32(string value)
+        {
+            byte[] array = Array.ConvertAll(value.Split(' '), byte.Parse);
+            return new Color32(array[0], array[1], array[2], 255);
+        }
         protected static string WriteColor32(Color32 value) => $"{value.r} {value.g} {value.b}";
 
         protected static string GetString(BinaryReader reader)
@@ -232,6 +245,7 @@ namespace Fluorite.Vox.Editor
             {
                 if (!values[i].Equals(values[length + i])) total++;
             }
+
             return total;
         }
         protected int Remainder(int bytes) => numBytes - bytes;
@@ -244,6 +258,7 @@ namespace Fluorite.Vox.Editor
                 size += Children[i].NumBytes;
                 size += Children[i].NumBytesChildren;
             }
+
             return size;
         }
         #endregion
@@ -287,7 +302,7 @@ namespace Fluorite.Vox.Editor
         public const int maxVoxels = 256;
 
         #region Fields
-        static byte[] buffer = new byte[maxVoxels * maxVoxels * maxVoxels * (Marshal.SizeOf<Color32>() / sizeof(byte))];
+        static readonly byte[] buffer = new byte[maxVoxels * maxVoxels * maxVoxels * (Marshal.SizeOf<Color32>() / sizeof(byte))];
         #endregion
 
         #region Properties
@@ -400,13 +415,8 @@ namespace Fluorite.Vox.Editor
         #endregion
 
         #region Constructors
-        public GroupChunk()
-        {
-        }
-        public GroupChunk(int[] children)
-        {
-            this.children = children;
-        }
+        public GroupChunk() { }
+        public GroupChunk(int[] children) => this.children = children;
         #endregion
 
         #region Methods
@@ -447,14 +457,12 @@ namespace Fluorite.Vox.Editor
         public int Flag { get; private set; }
         public int Layer { get; private set; }
         public int Reserved { get; private set; }
-        public Vector3 Position { get; private set; }
-        public Matrix4x4 Orientation { get; private set; }
+        public Vector3 Position { get; private set; } = Vector3.zero;
+        public Matrix4x4 Orientation { get; private set; } = Matrix4x4.identity;
         #endregion
 
         #region Constructors
-        public TransformChunk()
-        {
-        }
+        public TransformChunk() { }
         public TransformChunk(string name, int reference)
         {
             Name = name;
@@ -495,127 +503,72 @@ namespace Fluorite.Vox.Editor
         #endregion
 
         #region Support Methods
-        /* This is ridiculous and I love it
-            (c) ROTATION type
-
-            store a row-major rotation in the bits of a byte
-
-            for example :
-            R =
-             0  1  0
-             0  0 -1
-            -1  0  0
-            ==>
-            unsigned char _r = (1 << 0) | (2 << 2) | (0 << 4) | (1 << 5) | (1 << 6)
-
-            bit | value
-            0-1 : 1 : index of the non-zero entry in the first row
-            2-3 : 2 : index of the non-zero entry in the second row
-            4   : 0 : the sign in the first row (0 : positive; 1 : negative)
-            5   : 1 : the sign in the second row (0 : positive; 1 : negative)
-            6   : 1 : the sign in the third row (0 : positive; 1 : negative)
-         */
         void Read_r(string value)
         {
-            /* To be integrated
-            public Matrix3f readRotation(int rotation)
+            Matrix4x4 ReadRotation(int rotation)
             {
-                Matrix3f matrix = new Matrix3f();
+                Matrix4x4 matrix = new();
 
-                int firstIndex  = (rotation & 0b0011);
-                int secondIndex = (rotation & 0b1100) >> 2;
-                int[] array = {-1, -1, -1};
-                int index = 0;
+                int firstRowIndex = (rotation >> 0) & 3;
+                int secondRowIndex = (rotation >> 2) & 3;
+                int firstRowSign = (rotation >> 4) & 1;
+                int secondRowSign = (rotation >> 5) & 1;
+                int thirdRowSign = (rotation >> 6) & 1;
 
-                array[firstIndex] = 0;
-                array[secondIndex] = 0;
+                for (int i = 0; i < 4; i++)
+                    for (int j = 0; j < 4; j++)
+                        matrix[i, j] = 0;
 
-                for (int i = 0; i < array.length; i ++)
-                {
-                    if (array[i] == -1)
-                    {
-                        index = i;
+                matrix[3, 3] = 1;
 
-                        break;
-                    }
-                }
+                matrix[0, firstRowIndex] = firstRowSign == 0 ? 1 : -1;
+                matrix[1, secondRowIndex] = secondRowSign == 0 ? 1 : -1;
 
-                int thirdIndex = index;
-
-                boolean negativeFirst  = ((rotation & 0b0010000) >> 4) == 1;
-                boolean negativeSecond = ((rotation & 0b0100000) >> 5) == 1;
-                boolean negativeThird  = ((rotation & 0b1000000) >> 6) == 1;
-
-                matrix.setElement(0, firstIndex, negativeFirst ? -1 : 1);
-                matrix.setElement(1, secondIndex, negativeSecond ? -1 : 1);
-                matrix.setElement(2, thirdIndex, negativeThird ? -1 : 1);
+                int thirdRowIndex = 3 - (firstRowIndex + secondRowIndex);
+                matrix[2, thirdRowIndex] = thirdRowSign == 0 ? 1 : -1;
 
                 return matrix;
             }
-             * */
-            Matrix4x4 ReadRotation(byte rotationByte)
-            {
-                int column1Index = rotationByte & 3;
-                int column2Index = (rotationByte >> 2) & 3;
-                int column3Index = 3 - column1Index - column2Index;
-                int row1Sign = (rotationByte >> 4) & 1;
-                int row2Sign = (rotationByte >> 5) & 1;
-                int row3Sign = (rotationByte >> 6) & 1;
-                int value1 = row1Sign == 0 ? 1 : -1;
-                int value2 = row2Sign == 0 ? 1 : -1;
-                int value3 = row3Sign == 0 ? 1 : -1;
 
-                Matrix4x4 orientation = Matrix4x4.zero;
-                orientation[column1Index, 0] = value1;
-                orientation[column2Index, 1] = value2;
-                orientation[column3Index, 2] = value3;
-                orientation[3, 3] = 1;
-
-                Vector4 r1 = orientation.GetRow(1);
-                Vector4 r2 = orientation.GetRow(2);
-                orientation.SetRow(1, r2);
-                orientation.SetRow(2, r1);
-                orientation = orientation.transpose;
-                r1 = orientation.GetRow(1);
-                r2 = orientation.GetRow(2);
-                orientation.SetRow(1, r2);
-                orientation.SetRow(2, r1);
-
-
-
-                return orientation;
-            }
-
-            Orientation = ReadRotation((byte)ReadInt(value));
+            Orientation = ReadRotation(ReadInt(value));
         }
         string Write_r()
         {
-            byte WriteRotation(Matrix4x4 orientation)
+            int WriteRotation(Matrix4x4 matrix)
             {
-                Vector4 r1 = orientation.GetRow(1);
-                Vector4 r2 = orientation.GetRow(2);
-                orientation.SetRow(1, r2);
-                orientation.SetRow(2, r1);
-                orientation = orientation.transpose;
-                r1 = orientation.GetRow(1);
-                r2 = orientation.GetRow(2);
-                orientation.SetRow(1, r2);
-                orientation.SetRow(2, r1);
+                int rotation = 0;
 
-                Vector4 c1 = orientation.GetColumn(0);
-                Vector4 c2 = orientation.GetColumn(1);
-                Vector4 c3 = orientation.GetColumn(2);
+                int firstIndex = 0, secondIndex = 0;
+                bool negativeFirst = false, negativeSecond = false, negativeThird = false;
 
-                int column1Index = c1[0] != 0 ? 0 : c1[1] != 0 ? 1 : c1[2] != 0 ? 2 : 3;
-                int column2Index = c2[0] != 0 ? 0 : c2[1] != 0 ? 1 : c2[2] != 0 ? 2 : 3;
-                float value1 = c1[0] + c1[1] + c1[2];
-                float value2 = c2[0] + c2[1] + c2[2];
-                float value3 = c3[0] + c3[1] + c3[2];
-                int row1Sign = value1 > 0 ? 0 : 1;
-                int row2Sign = value2 > 0 ? 0 : 1;
-                int row3Sign = value3 > 0 ? 0 : 1;
+                for (int i = 0; i < 3; i++)
+                {
+                    if (matrix[0, i] == 1 || matrix[0, i] == -1)
+                    {
+                        firstIndex = i;
+                        negativeFirst = matrix[0, i] == -1;
+                    }
 
-                return (byte)((column1Index & 3) | (column2Index & 3) << 2 | row1Sign << 4 | row2Sign << 5 | row3Sign << 6);
+                    if (matrix[1, i] == 1 || matrix[1, i] == -1)
+                    {
+                        secondIndex = i;
+                        negativeSecond = matrix[1, i] == -1;
+                    }
+
+                    if (matrix[2, i] == 1 || matrix[2, i] == -1)
+                    {
+                        negativeThird = matrix[2, i] == -1;
+                    }
+                }
+
+                rotation |= firstIndex;
+                rotation |= secondIndex << 2;
+
+                if (negativeFirst) rotation |= 1 << 4;
+                if (negativeSecond) rotation |= 1 << 5;
+                if (negativeThird) rotation |= 1 << 6;
+
+                return rotation;
             }
 
             return WriteInt(WriteRotation(Orientation));
@@ -636,9 +589,7 @@ namespace Fluorite.Vox.Editor
         #endregion
 
         #region Constructors
-        public ShapeChunk()
-        {
-        }
+        public ShapeChunk() { }
         public ShapeChunk(int index)
         {
             ShapeIndex = index;

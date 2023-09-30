@@ -12,7 +12,6 @@ namespace Fluorite.Vox.Editor
 {
 #if PACKAGE_TRIINSPECTOR
     [DeclareTabGroup("Tab")]
-    [DeclareHorizontalGroup("Collider")]
 #endif
     [ScriptedImporter(1, "vox")]
     public partial class VoxImporter : ScriptedImporter
@@ -29,6 +28,7 @@ namespace Fluorite.Vox.Editor
         [GroupNext("Tab"), Tab("Model")]
 #endif
         public float scaleFactor = 1;
+
         public StaticEditorFlags staticFlags = (StaticEditorFlags)byte.MaxValue;
         public int baseLayer;
 #if PACKAGE_TRIINSPECTOR
@@ -41,6 +41,13 @@ namespace Fluorite.Vox.Editor
         public bool convex;
 #if PACKAGE_TRIINSPECTOR
         [GroupNext("Tab"), Tab("Material")]
+        [InfoBox("Color => Direct mapping", TriMessageType.None)]
+        [InfoBox("Roughness => [Smoothness = (1 - Roughness) ^ 2]", TriMessageType.None)]
+        [InfoBox("IOR => Direct mapping (only used in Glass)", TriMessageType.None)]
+        [InfoBox("Specular => [SpecularColor = Metallic * Color * Specular]", TriMessageType.None)]
+        [InfoBox("Metallic => Direct mapping", TriMessageType.None)]
+        [InfoBox("Emit => [Emission = lerp(0, Color ^ Flux, Emission)]", TriMessageType.None)]
+        [InfoBox("Glass => [Alpha = 1 - Transparency]", TriMessageType.None)]
 #endif
         public ImportMaterialType importMaterials = ImportMaterialType.Default;
         #endregion
@@ -73,14 +80,17 @@ namespace Fluorite.Vox.Editor
                     context.AddObjectToAsset(texture.name, texture);
                     textures.Add(texture);
                 }
+
                 foreach (Material material in shape.Materials)
                 {
                     if (materials.Contains(material)) continue;
                     context.AddObjectToAsset(material.name, material);
                     materials.Add(material);
                 }
+
                 context.AddObjectToAsset(shape.Mesh.name, shape.Mesh);
             }
+
             context.AddObjectToAsset(name, gameObject);
             context.SetMainObject(gameObject);
 

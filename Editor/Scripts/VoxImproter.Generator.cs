@@ -20,32 +20,32 @@ namespace Fluorite.Vox.Editor
             const int maxVoxels = XyziChunk.maxVoxels;
             const int maxColors = RgbaChunk.maxColors;
 
-            static Lazy<VoxRenderPipelineAsset> PipelineAssetLazy = new(() => AssetDatabase.FindAssets($"t: {nameof(VoxRenderPipelineAsset)}").Select(x => AssetDatabase.LoadAssetAtPath<VoxRenderPipelineAsset>(AssetDatabase.GUIDToAssetPath(x))).FirstOrDefault() ?? ScriptableObject.CreateInstance<VoxRenderPipelineAsset>());
-            static VoxRenderPipelineAsset PipelineAsset => PipelineAssetLazy.Value;
+            static readonly Lazy<VoxRenderPipelineAsset> pipelineAssetLazy = new(() => AssetDatabase.FindAssets($"t: {nameof(VoxRenderPipelineAsset)}").Select(x => AssetDatabase.LoadAssetAtPath<VoxRenderPipelineAsset>(AssetDatabase.GUIDToAssetPath(x))).FirstOrDefault() ?? ScriptableObject.CreateInstance<VoxRenderPipelineAsset>());
+            static VoxRenderPipelineAsset PipelineAsset => pipelineAssetLazy.Value;
 
             class ShapeGenerator
             {
-                record IndexedTextures (int Index, Texture2D Texture, Texture2D Mask);
+                record IndexedTextures(int Index, Texture2D Texture, Texture2D Mask);
 
                 #region Fields
-                Color32[] colors;
-                Texture2D palette;
-                Material paletteMaterial;
-                Material[] materials;
-                MaterialType[] materialType;
-                byte[] voxel = new byte[maxVoxels * maxVoxels * maxVoxels];
-                bool[] processed = new bool[maxVoxels * maxVoxels * maxVoxels];
+                readonly Color32[] colors;
+                readonly Texture2D palette;
+                readonly Material paletteMaterial;
+                readonly Material[] materials;
+                readonly MaterialType[] materialType;
+                readonly byte[] voxel = new byte[maxVoxels * maxVoxels * maxVoxels];
+                readonly bool[] processed = new bool[maxVoxels * maxVoxels * maxVoxels];
 
                 int index;
-                List<Vector3> vertices = new(ushort.MaxValue);
-                List<Vector3> normals = new(ushort.MaxValue);
-                List<Vector2> uv0 = new(ushort.MaxValue);
-                List<Vector2> uv1 = new(ushort.MaxValue);
+                readonly List<Vector3> vertices = new(ushort.MaxValue);
+                readonly List<Vector3> normals = new(ushort.MaxValue);
+                readonly List<Vector2> uv0 = new(ushort.MaxValue);
+                readonly List<Vector2> uv1 = new(ushort.MaxValue);
 
-                List<int> paletteTriangles = new();
-                List<int>[] mattersTriangles = new List<int>[maxColors];
-                List<int>[] combinedMattersTriangles = new List<int>[(int)MaterialType.Count];
-                List<IndexedTextures>[] combinedMattersTextures = new List<IndexedTextures>[(int)MaterialType.Count];
+                readonly List<int> paletteTriangles = new();
+                readonly List<int>[] mattersTriangles = new List<int>[maxColors];
+                readonly List<int>[] combinedMattersTriangles = new List<int>[(int)MaterialType.Count];
+                readonly List<IndexedTextures>[] combinedMattersTextures = new List<IndexedTextures>[(int)MaterialType.Count];
                 #endregion
 
                 #region Constructors
@@ -65,10 +65,12 @@ namespace Fluorite.Vox.Editor
                         byte w = points[i].a;
                         voxel[x + maxVoxels * (y + maxVoxels * z)] = w;
                     }
+
                     for (int i = 0; i < maxColors; ++i)
                     {
                         if (materials[i]) mattersTriangles[i] = new List<int>(ushort.MaxValue);
                     }
+
                     for (int i = 0; i < (int)MaterialType.Count; ++i)
                     {
                         combinedMattersTriangles[i] = new List<int>(ushort.MaxValue);
@@ -401,6 +403,7 @@ namespace Fluorite.Vox.Editor
                         textureCount++;
                         materialCount++;
                     }
+
                     for (int i = 0; i < combinedMattersTriangles.Length; ++i)
                     {
                         if (!ImportCombinedMaterials(importMaterials) || combinedMattersTriangles[i].Count <= 0) continue;
@@ -408,6 +411,7 @@ namespace Fluorite.Vox.Editor
                         else textureCount += 2;
                         materialCount++;
                     }
+
                     for (int i = 0; i < mattersTriangles.Length; ++i)
                         if (ImportMaterials(importMaterials) && materials[i] && mattersTriangles[i].Count > 0)
                             materialCount++;
@@ -420,6 +424,7 @@ namespace Fluorite.Vox.Editor
                         shapeTextures[textureIndex++] = palette;
                         shapeMaterials[materialIndex++] = paletteMaterial;
                     }
+
                     for (int i = 0; i < combinedMattersTriangles.Length; ++i)
                     {
                         MaterialType type = (MaterialType)i;
@@ -452,12 +457,12 @@ namespace Fluorite.Vox.Editor
             }
 
             #region Fields
-            float scaleFactor;
-            StaticEditorFlags staticFlags;
-            int baseLayer;
-            bool generateColliders;
-            bool convex;
-            ImportMaterialType importMaterials;
+            readonly float scaleFactor;
+            readonly StaticEditorFlags staticFlags;
+            readonly int baseLayer;
+            readonly bool generateColliders;
+            readonly bool convex;
+            readonly ImportMaterialType importMaterials;
             #endregion
 
             #region Constructors
@@ -507,6 +512,7 @@ namespace Fluorite.Vox.Editor
                     Vector3Int size = new(sizeChunk.Size.x, sizeChunk.Size.z, sizeChunk.Size.y);
                     shapes.Add(generator.CreateShape(size, scaleFactor, importMaterials));
                 }
+
                 for (int i = 0; i < shapes.Count; ++i) shapes[i].Mesh.name = $"Shape {i + 1}";
 
                 TransformChunk transform = (TransformChunk)main.Children.FirstOrDefault(x => x is TransformChunk);
@@ -560,7 +566,7 @@ namespace Fluorite.Vox.Editor
                 GameObjectUtility.SetStaticEditorFlags(gameObject, staticFlags);
 
                 gameObject.transform.localPosition = position * scaleFactor;
-                if (orientation != default) gameObject.transform.rotation = orientation.rotation;
+                gameObject.transform.rotation = orientation.rotation;
                 if (baseLayer >= 0 && transformLayer >= 0) gameObject.layer = baseLayer + transformLayer;
 
                 return gameObject;
@@ -610,6 +616,7 @@ namespace Fluorite.Vox.Editor
                         foreach (int index in group.children) CreateGameObject((TransformChunk)objects[index], objects, shapes, gameObject.transform);
                         return gameObject;
                     }
+
                     if (objects[transform.Reference] is ShapeChunk shape)
                     {
                         return CreateGameObject(transform.Name, transform.Position, transform.Orientation, transform.Layer, shapes[shape.ShapeIndex].Mesh, shapes[shape.ShapeIndex].Materials, parent);

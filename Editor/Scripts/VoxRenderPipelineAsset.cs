@@ -8,10 +8,6 @@ namespace Fluorite.Vox.Editor
     [CreateAssetMenu(fileName = "VRP", menuName = "Vox/Render Pipeline Asset")]
     public sealed class VoxRenderPipelineAsset : ScriptableObject
     {
-        const float metalIORDivider = 3.0f;
-        const float metalSpecularDivider = 2.0f;
-        const float glassIORDivider = 2.0f;
-
         #region Fields
         [Header("Shader")]
         [SerializeField] Shader diffuseShader;
@@ -26,10 +22,10 @@ namespace Fluorite.Vox.Editor
         [SerializeField] string colorProperty = "_Color";
 
         [Header("Metallic")]
-        [SerializeField] string roughnessProperty = "_Roughness";
-        [SerializeField] string iorProperty = "_IOR";
-        [SerializeField] string specularProperty = "_Specular";
         [SerializeField] string metallicProperty = "_Metallic";
+        [SerializeField] string specularProperty = "_Specular";
+        [SerializeField] string iorProperty = "_IOR";
+        [SerializeField] string smoothnessProperty = "_Smoothness";
 
         [Header("Emissive")]
         [SerializeField] string emissionProperty = "_Emission";
@@ -44,10 +40,10 @@ namespace Fluorite.Vox.Editor
         public string BaseMapProperty => baseMapProperty;
         public string MaskMapProperty => maskMapProperty;
         public string ColorProperty => colorProperty;
-        public string RoughnessProperty => roughnessProperty;
-        public string IorProperty => iorProperty;
-        public string SpecularProperty => specularProperty;
         public string MetallicProperty => metallicProperty;
+        public string SpecularProperty => specularProperty;
+        public string IorProperty => iorProperty;
+        public string SmoothnessProperty => smoothnessProperty;
         public string EmissionProperty => emissionProperty;
         public string FluxProperty => fluxProperty;
         public string LowDynamicRangeProperty => lowDynamicRangeProperty;
@@ -82,24 +78,24 @@ namespace Fluorite.Vox.Editor
             {
                 case MaterialType.Metal:
                     material.SetColor(colorProperty, color);
-                    material.SetFloat(roughnessProperty, roughness);
-                    material.SetFloat(iorProperty, ior / metalIORDivider);
-                    material.SetFloat(specularProperty, specular / metalSpecularDivider);
                     material.SetFloat(metallicProperty, metal);
+                    material.SetFloat(specularProperty, Mathf.Clamp01(specular - 1));
+                    material.SetFloat(iorProperty, Mathf.Clamp01((1 + ior) / 3));
+                    material.SetFloat(smoothnessProperty, 1 - roughness);
                     break;
 
                 case MaterialType.Emission:
                     material.SetColor(colorProperty, color);
                     material.SetFloat(emissionProperty, emission);
-                    material.SetFloat(fluxProperty, flux);
+                    material.SetFloat(fluxProperty, Mathf.Clamp01(flux / 4));
                     material.SetFloat(lowDynamicRangeProperty, lowDynamicRange);
                     break;
 
                 case MaterialType.Glass:
                     material.SetColor(colorProperty, color);
-                    material.SetFloat(roughnessProperty, roughness);
-                    material.SetFloat(iorProperty, ior / glassIORDivider);
                     material.SetFloat(transparencyProperty, transparency);
+                    material.SetFloat(iorProperty, Mathf.Clamp01((1 + ior) / 3));
+                    material.SetFloat(smoothnessProperty, 1 - roughness);
                     break;
             }
             return material;
@@ -147,37 +143,18 @@ namespace Fluorite.Vox.Editor
                         case MaterialType.Metal:
                             if (material)
                             {
-                                colors[index].r = (byte)(material.GetFloat(roughnessProperty) * 255);
-                                colors[index].g = (byte)(material.GetFloat(iorProperty) * 255);
-                                colors[index].b = (byte)(material.GetFloat(specularProperty) * 255);
-                                colors[index].a = (byte)(material.GetFloat(metallicProperty) * 255);
-                            }
-                            else
-                            {
-                                colors[index].r = 0;
-                                colors[index].g = 0;
-                                colors[index].b = 0;
-                                colors[index].a = 0;
+                                colors[index].r = (byte)(material.GetFloat(metallicProperty) * 255);
+                                colors[index].g = (byte)(material.GetFloat(specularProperty) * 255);
+                                colors[index].b = (byte)(material.GetFloat(iorProperty) * 255);
+                                colors[index].a = (byte)(material.GetFloat(smoothnessProperty) * 255);
                             }
                             break;
 
                         case MaterialType.Emission:
-                            if (material)
-                            {
-                                colors[index].r = (byte)(material.GetFloat(emissionProperty) * 255);
-                                colors[index].g = (byte)(material.GetFloat(fluxProperty) * 255);
-                                colors[index].b = (byte)(material.GetFloat(lowDynamicRangeProperty) * 255);
-                            }
-                            break;
+                            throw new NotSupportedException();
 
                         case MaterialType.Glass:
-                            if (material)
-                            {
-                                colors[index].r = (byte)(material.GetFloat(roughnessProperty) * 255);
-                                colors[index].g = (byte)(material.GetFloat(iorProperty) * 255);
-                                colors[index].b = (byte)(material.GetFloat(transparencyProperty) * 255);
-                            }
-                            break;
+                            throw new NotSupportedException();
                     }
                 }
             }
