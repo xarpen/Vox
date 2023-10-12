@@ -8,5 +8,6 @@
   "dependencies": {
     "com.codewriter.triinspector": "1.10.1"
   },
-  "description": "Native VOX format support."
+  "description": "Native VOX format support.",
+  "hideInEditor": false
 }
