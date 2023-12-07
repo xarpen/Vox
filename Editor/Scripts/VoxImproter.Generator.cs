@@ -559,21 +559,26 @@ namespace Fluorite.Vox.Editor
             #endregion
 
             #region Support Methods
-            GameObject CreateGameObject(string name, Vector3 position, Matrix4x4 orientation, int transformLayer, Transform parent)
+            GameObject CreateGameObject(string name, Vector3 position, Vector3 rotation, Vector3 scale, int transformLayer, Transform parent)
             {
                 GameObject gameObject = new(name ?? "Shape");
                 gameObject.transform.SetParent(parent);
                 GameObjectUtility.SetStaticEditorFlags(gameObject, staticFlags);
 
                 gameObject.transform.localPosition = position * scaleFactor;
-                gameObject.transform.rotation = orientation.rotation;
+                gameObject.transform.rotation = Quaternion.Euler(rotation);
+                gameObject.transform.localScale = scale;
                 if (baseLayer >= 0 && transformLayer >= 0) gameObject.layer = baseLayer + transformLayer;
 
                 return gameObject;
             }
-            GameObject CreateGameObject(string name, Vector3 position, Matrix4x4 orientation, int transformLayer, Mesh mesh, Material[] materials, Transform parent)
+            GameObject CreateGameObject(string name, Vector3 position, Vector3 rotation, Vector3 scale, int transformLayer, Mesh mesh, Material[] materials, Transform parent)
             {
-                GameObject gameObject = CreateGameObject(name, parent ? position : Vector3.zero, parent ? orientation : Matrix4x4.identity, transformLayer, parent);
+                GameObject gameObject = CreateGameObject(name,
+                                                         parent ? position : Vector3.zero,
+                                                         rotation,
+                                                         scale,
+                                                         transformLayer, parent);
 
                 gameObject.AddComponent<MeshFilter>().sharedMesh = mesh;
                 gameObject.AddComponent<MeshRenderer>().sharedMaterials = materials;
@@ -590,9 +595,9 @@ namespace Fluorite.Vox.Editor
                     Vector3 offset = position * scaleFactor;
                     Vector3[] vertices = mesh.vertices;
                     Vector3[] normals = mesh.normals;
-                    Quaternion rotation = orientation.rotation;
-                    for (int i = 0; i < vertices.Length; ++i) vertices[i] = rotation * vertices[i] + offset;
-                    for (int i = 0; i < normals.Length; ++i) normals[i] = rotation * normals[i];
+                    Quaternion rot = Quaternion.Euler(rotation);
+                    for (int i = 0; i < vertices.Length; ++i) vertices[i] = rot * vertices[i] + offset;
+                    for (int i = 0; i < normals.Length; ++i) normals[i] = rot * normals[i];
                     mesh.vertices = vertices;
                     mesh.normals = normals;
                     mesh.RecalculateBounds();
@@ -606,20 +611,20 @@ namespace Fluorite.Vox.Editor
                 {
                     if (objects[transform.Reference] is GroupChunk group)
                     {
-                        if (transform.Position == default && transform.Orientation == default && group.children.Length == 1)
+                        if (transform.Position == default && transform.EulerAngles == default && transform.Scale == Vector3.one && group.children.Length == 1)
                         {
                             transform = (TransformChunk)objects[group.children[0]];
                             continue;
                         }
 
-                        GameObject gameObject = CreateGameObject(transform.Name, transform.Position, transform.Orientation, transform.Layer, parent);
+                        GameObject gameObject = CreateGameObject(transform.Name, transform.Position, transform.EulerAngles, transform.Scale, transform.Layer, parent);
                         foreach (int index in group.children) CreateGameObject((TransformChunk)objects[index], objects, shapes, gameObject.transform);
                         return gameObject;
                     }
 
                     if (objects[transform.Reference] is ShapeChunk shape)
                     {
-                        return CreateGameObject(transform.Name, transform.Position, transform.Orientation, transform.Layer, shapes[shape.ShapeIndex].Mesh, shapes[shape.ShapeIndex].Materials, parent);
+                        return CreateGameObject(transform.Name, transform.Position, transform.EulerAngles, transform.Scale, transform.Layer, shapes[shape.ShapeIndex].Mesh, shapes[shape.ShapeIndex].Materials, parent);
                     }
 
                     throw new NotSupportedException();

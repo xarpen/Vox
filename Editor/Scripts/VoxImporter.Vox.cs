@@ -207,6 +207,7 @@ namespace Fluorite.Vox.Editor
             writer.Write(buffer, 0, GetBytes(value));
         }
 
+        protected static uint ReadUInt(string value) => uint.Parse(value, CultureInfo.InvariantCulture);
         protected static int ReadInt(string value) => int.Parse(value, CultureInfo.InvariantCulture);
         protected static string WriteInt(int value) => value.ToString(CultureInfo.InvariantCulture);
         protected static float ReadFloat(string value) => float.Parse(value, CultureInfo.InvariantCulture);
@@ -449,7 +450,7 @@ namespace Fluorite.Vox.Editor
             {
                 int size = 5 * sizeof(int);
                 if (Position != Vector3.zero) size += KeyValueSize(t, WriteVector3(Position));
-                if (Orientation != default) size += KeyValueSize(r, Write_r());
+                if (EulerAngles != default || Scale != Vector3.one) size += KeyValueSize(r, Write_r());
                 return base.NumBytes + size;
             }
         }
@@ -458,7 +459,8 @@ namespace Fluorite.Vox.Editor
         public int Layer { get; private set; }
         public int Reserved { get; private set; }
         public Vector3 Position { get; private set; } = Vector3.zero;
-        public Matrix4x4 Orientation { get; private set; } = Matrix4x4.identity;
+        public Vector3 EulerAngles { get; private set; } = Vector3.zero;
+        public Vector3 Scale { get; private set; } = Vector3.one;
         #endregion
 
         #region Constructors
@@ -496,8 +498,8 @@ namespace Fluorite.Vox.Editor
             writer.Write(Flag);
             writer.Write(Layer);
             writer.Write(Reserved);
-            writer.Write((Position != Vector3.zero ? 1 : 0) + (Orientation != default ? 1 : 0));
-            if (Orientation != default) WriteKeyValue(writer, r, Write_r());
+            writer.Write((Position != Vector3.zero ? 1 : 0) + (EulerAngles != default || Scale != Vector3.one ? 1 : 0));
+            if (EulerAngles != default || Scale != Vector3.one) WriteKeyValue(writer, r, Write_r());
             if (Position != Vector3.zero) WriteKeyValue(writer, t, WriteVector3(Position));
         }
         #endregion
@@ -505,32 +507,47 @@ namespace Fluorite.Vox.Editor
         #region Support Methods
         void Read_r(string value)
         {
-            Matrix4x4 ReadRotation(int rotation)
+            (Vector3 Euler, Vector3 Scale) ReadRotation(int rotation)
             {
-                Matrix4x4 matrix = new();
+                switch (rotation)
+                {
+                    // Single rotations
+                    case 0b0101000: return (new Vector3(-90, 0, 0), Vector3.one);
+                    case 0b1100100: return (new Vector3(-180, 0, 0), Vector3.one);
+                    case 0b1001000: return (new Vector3(-270, 0, 0), Vector3.one);
+                    case 0b1000110: return (new Vector3(0, 0, -90), Vector3.one);
+                    case 0b1010100: return (new Vector3(0, 0, -180), Vector3.one);
+                    case 0b0010110: return (new Vector3(0, 0, -270), Vector3.one);
+                    case 0b0010001: return (new Vector3(0, -90, 0), Vector3.one);
+                    case 0b0110100: return (new Vector3(0, -180, 0), Vector3.one);
+                    case 0b0100001: return (new Vector3(0, -270, 0), Vector3.one);
 
-                int firstRowIndex = (rotation >> 0) & 3;
-                int secondRowIndex = (rotation >> 2) & 3;
-                int firstRowSign = (rotation >> 4) & 1;
-                int secondRowSign = (rotation >> 5) & 1;
-                int thirdRowSign = (rotation >> 6) & 1;
+                    // Single flip
+                    case 0b0010100: return (new Vector3(0, 0, 0), new Vector3(-1, 1, 1));
+                    //case 0b0100100: return (new Vector3(0, 0, 0), new Vector3(1, 1, -1));
+                    //case 0b1000100: return (new Vector3(0, 0, 0), new Vector3(1, -1, 1));
 
-                for (int i = 0; i < 4; i++)
-                    for (int j = 0; j < 4; j++)
-                        matrix[i, j] = 0;
+                    // X rotations and flip
+                    case 0b0111000: return (new Vector3(-90, 0, 0), new Vector3(-1, 1, 1));
+                    case 0b0001000: return (new Vector3(-90, 0, 0), new Vector3(1, 1, -1));
+                    case 0b1101000: return (new Vector3(-90, 0, 0), new Vector3(1, -1, 1));
+                    case 0b1110100: return (new Vector3(-180, 0, 0), new Vector3(-1, 1, 1));
+                    case 0b1000100: return (new Vector3(-180, 0, 0), new Vector3(1, 1, -1));
+                    case 0b0100100: return (new Vector3(-180, 0, 0), new Vector3(1, -1, 1));
+                    case 0b1011000: return (new Vector3(-270, 0, 0), new Vector3(-1, 1, 1));
+                    //case 0b1101000: return (new Vector3(-270, 0, 0), new Vector3(1, 1, -1));
+                    //case 0b0001000: return (new Vector3(-270, 0, 0), new Vector3(1, -1, 1));
 
-                matrix[3, 3] = 1;
+                    // Y rotations and flip
+                    case 0b1010110: return (new Vector3(0, 0, -90), new Vector3(-1, 1, 1));
+                    case 0b0000110: return (new Vector3(0, 0, -90), new Vector3(1, -1, 1));
+                    case 0b1100110: return (new Vector3(0, 0, -90), new Vector3(1, 1, -1));
 
-                matrix[0, firstRowIndex] = firstRowSign == 0 ? 1 : -1;
-                matrix[1, secondRowIndex] = secondRowSign == 0 ? 1 : -1;
-
-                int thirdRowIndex = 3 - (firstRowIndex + secondRowIndex);
-                matrix[2, thirdRowIndex] = thirdRowSign == 0 ? 1 : -1;
-
-                return matrix;
+                    default: return (new Vector3(0, 0, 0), Vector3.one);
+                }
             }
 
-            Orientation = ReadRotation(ReadInt(value));
+            (EulerAngles, Scale) = ReadRotation(ReadInt(value));
         }
         string Write_r()
         {
@@ -571,7 +588,7 @@ namespace Fluorite.Vox.Editor
                 return rotation;
             }
 
-            return WriteInt(WriteRotation(Orientation));
+            throw new NotImplementedException();
         }
         #endregion
     }
