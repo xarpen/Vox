@@ -542,6 +542,23 @@ namespace Fluorite.Vox.Editor
                     case 0b1010110: return (new Vector3(0, 0, -90), new Vector3(-1, 1, 1));
                     case 0b0000110: return (new Vector3(0, 0, -90), new Vector3(1, -1, 1));
                     case 0b1100110: return (new Vector3(0, 0, -90), new Vector3(1, 1, -1));
+                    case 0b1011110: return (new Vector3(0, 0, -180), new Vector3(-1, 1, 1));
+                    case 0b0001110: return (new Vector3(0, 0, -180), new Vector3(1, -1, 1));
+                    case 0b1101110: return (new Vector3(0, 0, -180), new Vector3(1, 1, -1));
+                    case 0b0011110: return (new Vector3(0, 0, -270), new Vector3(-1, 1, 1));
+                    case 0b0110110: return (new Vector3(0, 0, -270), new Vector3(1, -1, 1));
+                    case 0b0100110: return (new Vector3(0, 0, -270), new Vector3(1, 1, -1));
+
+                    // Z rotations with flip
+                    case 0b0011001: return (new Vector3(0, -90, 0), new Vector3(-1, 1, 1));
+                    case 0b0111001: return (new Vector3(0, -90, 0), new Vector3(1, -1, 1));
+                    case 0b0101001: return (new Vector3(0, -90, 0), new Vector3(1, 1, -1));
+                    case 0b0011100: return (new Vector3(0, -180, 0), new Vector3(-1, 1, 1));
+                    case 0b0111100: return (new Vector3(0, -180, 0), new Vector3(1, -1, 1));
+                    case 0b0101100: return (new Vector3(0, -180, 0), new Vector3(1, 1, -1));
+                    case 0b0010101: return (new Vector3(0, -270, 0), new Vector3(-1, 1, 1));
+                    case 0b0110101: return (new Vector3(0, -270, 0), new Vector3(1, -1, 1));
+                    case 0b0100101: return (new Vector3(0, -270, 0), new Vector3(1, 1, -1));
 
                     default: return (new Vector3(0, 0, 0), Vector3.one);
                 }
@@ -551,6 +568,7 @@ namespace Fluorite.Vox.Editor
         }
         string Write_r()
         {
+            /*
             int WriteRotation(Matrix4x4 matrix)
             {
                 int rotation = 0;
@@ -587,6 +605,7 @@ namespace Fluorite.Vox.Editor
 
                 return rotation;
             }
+            */
 
             throw new NotImplementedException();
         }
