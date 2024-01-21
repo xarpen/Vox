@@ -4,15 +4,9 @@ using System.IO;
 using UnityEditor;
 using UnityEditor.AssetImporters;
 using UnityEngine;
-#if PACKAGE_TRIINSPECTOR
-using TriInspector;
-#endif
 
 namespace Fluorite.Vox.Editor
 {
-#if PACKAGE_TRIINSPECTOR
-    [DeclareTabGroup("Tab")]
-#endif
     [ScriptedImporter(1, "vox")]
     public partial class VoxImporter : ScriptedImporter
     {
@@ -24,31 +18,23 @@ namespace Fluorite.Vox.Editor
         }
 
         #region Fields
-#if PACKAGE_TRIINSPECTOR
-        [GroupNext("Tab"), Tab("Model")]
-#endif
+        [Header("Model")]
         public float scaleFactor = 1;
-
         public StaticEditorFlags staticFlags = (StaticEditorFlags)byte.MaxValue;
         public int baseLayer;
-#if PACKAGE_TRIINSPECTOR
-        [GroupNext("Tab"), Tab("Collider")]
-#endif
+
+        [Header("Collider")]
         public bool generateColliders = true;
-#if PACKAGE_TRIINSPECTOR
-        [EnableIf(nameof(generateColliders))]
-#endif
         public bool convex;
-#if PACKAGE_TRIINSPECTOR
-        [GroupNext("Tab"), Tab("Material")]
-        [InfoBox("Color => Direct mapping", TriMessageType.None)]
-        [InfoBox("Roughness => [Smoothness = (1 - Roughness) ^ 2]", TriMessageType.None)]
-        [InfoBox("IOR => Direct mapping (only used in Glass)", TriMessageType.None)]
-        [InfoBox("Specular => [SpecularColor = Metallic * Color * Specular]", TriMessageType.None)]
-        [InfoBox("Metallic => Direct mapping", TriMessageType.None)]
-        [InfoBox("Emit => [Emission = lerp(0, Color ^ Flux, Emission)]", TriMessageType.None)]
-        [InfoBox("Glass => [Alpha = 1 - Transparency]", TriMessageType.None)]
-#endif
+
+        // Color => Direct mapping
+        // Roughness => [Smoothness = (1 - Roughness) ^ 2]
+        // IOR => Direct mapping (only used in Glass)
+        // Specular => [SpecularColor = Metallic * Color * Specular]
+        // Metallic => Direct mapping
+        // Emit => [Emission = lerp(0, Color ^ Flux, Emission)]
+        // Glass => [Alpha = 1 - Transparency]
+        [Header("Material")]
         public ImportMaterialType importMaterials = ImportMaterialType.Default;
         #endregion
 
