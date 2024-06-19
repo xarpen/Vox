@@ -22,6 +22,7 @@ namespace Fluorite.Vox.Editor
         public float scaleFactor = 1;
         public StaticEditorFlags staticFlags = (StaticEditorFlags)byte.MaxValue;
         public int baseLayer;
+        public string tag;
 
         [Header("Collider")]
         public bool generateColliders = true;
@@ -76,6 +77,8 @@ namespace Fluorite.Vox.Editor
 
                 context.AddObjectToAsset(shape.Mesh.name, shape.Mesh);
             }
+
+            if (!string.IsNullOrEmpty(tag)) gameObject.tag = tag;
 
             context.AddObjectToAsset(name, gameObject);
             context.SetMainObject(gameObject);
