@@ -251,6 +251,7 @@
     "m_OutputNode": {
         "m_Id": ""
     },
+    "m_SubDatas": [],
     "m_ActiveTargets": [
         {
             "m_Id": "bdc25709fe5f4528949a54a850a9272e"
@@ -477,7 +478,7 @@
     "m_SGVersion": 0,
     "m_Type": "UnityEditor.Rendering.HighDefinition.ShaderGraph.SystemData",
     "m_ObjectId": "157bb9162ffb46adba96acb711cd265a",
-    "m_MaterialNeedsUpdateHash": 552,
+    "m_MaterialNeedsUpdateHash": 23,
     "m_SurfaceType": 1,
     "m_RenderingPass": 4,
     "m_BlendMode": 0,
@@ -487,6 +488,7 @@
     "m_OpaqueCullMode": 2,
     "m_SortPriority": 0,
     "m_AlphaTest": false,
+    "m_ExcludeFromTUAndAA": false,
     "m_TransparentDepthPrepass": false,
     "m_TransparentDepthPostpass": false,
     "m_SupportLodCrossFade": false,
@@ -1235,7 +1237,7 @@
         "selectedEntry": 0,
         "popupEntries": []
     },
-    "m_SerializedDiffusionProfile": "",
+    "m_SerializedDiffusionProfile": "{\n    \"diffusionProfileAsset\": {\n        \"fileID\": 11400000,\n        \"guid\": \"2384dbf2c1c420f45a792fbc315fbfb1\",\n        \"type\": 2\n    }\n}",
     "m_Version": 1
 }
 

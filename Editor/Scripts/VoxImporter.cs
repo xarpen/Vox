@@ -37,6 +37,7 @@ namespace Fluorite.Vox.Editor
         // Glass => [Alpha = 1 - Transparency]
         [Header("Material")]
         public ImportMaterialType importMaterials = ImportMaterialType.Default;
+        public bool exportMaterials;
         #endregion
 
         #region Callbacks
@@ -71,7 +72,19 @@ namespace Fluorite.Vox.Editor
                 foreach (Material material in shape.Materials)
                 {
                     if (materials.Contains(material)) continue;
-                    context.AddObjectToAsset(material.name, material);
+
+                    if (exportMaterials)
+                    {
+                        string folder = Path.Combine(Path.GetDirectoryName(context.assetPath), "Materials");
+                        if (!AssetDatabase.IsValidFolder(folder))
+                            AssetDatabase.CreateFolder(folder, "Materials");
+
+                        AssetDatabase.CreateAsset(material, Path.Combine(folder, $"{material.name}.mat"));
+                    }
+                    else
+                    {
+                        context.AddObjectToAsset(material.name, material);
+                    }
                     materials.Add(material);
                 }
 
