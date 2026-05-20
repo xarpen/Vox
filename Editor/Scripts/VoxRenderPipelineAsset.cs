@@ -1,4 +1,4 @@
-﻿using UnityEngine;
+using UnityEngine;
 using System.Linq;
 using System.Collections.Generic;
 using System;
@@ -29,7 +29,7 @@ namespace Fluorite.Vox.Editor
 
         [Header("Emissive")]
         [SerializeField] string emissionProperty = "_Emission";
-        [SerializeField] string fluxProperty = "_Flux";
+        [SerializeField] string radiationFluxProperty = "_Flux";
         [SerializeField] string lowDynamicRangeProperty = "_LowDynamicRange";
 
         [Header("Transparent")]
@@ -45,7 +45,7 @@ namespace Fluorite.Vox.Editor
         public string IorProperty => iorProperty;
         public string SmoothnessProperty => smoothnessProperty;
         public string EmissionProperty => emissionProperty;
-        public string FluxProperty => fluxProperty;
+        public string RadiationFluxProperty => radiationFluxProperty;
         public string LowDynamicRangeProperty => lowDynamicRangeProperty;
         public string TransparencyProperty => transparencyProperty;
         #endregion
@@ -57,9 +57,9 @@ namespace Fluorite.Vox.Editor
             {
                 MaterialType.Diffuse => diffuseShader,
                 MaterialType.Metal => combined ? metalCombinedShader : metalShader,
-                MaterialType.Glass when combined => throw new NotImplementedException(),
+                MaterialType.Glass when combined => metalCombinedShader,
                 MaterialType.Glass => glassShader,
-                MaterialType.Emission when combined => throw new NotImplementedException(),
+                MaterialType.Emission when combined => metalCombinedShader,
                 MaterialType.Emission => emitShader,
                 _ => throw new ArgumentOutOfRangeException()
             };
@@ -80,24 +80,25 @@ namespace Fluorite.Vox.Editor
                     material.SetColor(colorProperty, color);
                     material.SetFloat(metallicProperty, metal);
                     material.SetFloat(specularProperty, Mathf.Clamp01(specular - 1));
-                    material.SetFloat(iorProperty, Mathf.Clamp01((1 + ior) / 3));
+                    // material.SetFloat(iorProperty, 1 + ior);
                     material.SetFloat(smoothnessProperty, 1 - roughness);
                     break;
 
                 case MaterialType.Emission:
                     material.SetColor(colorProperty, color);
                     material.SetFloat(emissionProperty, emission);
-                    material.SetFloat(fluxProperty, Mathf.Clamp01(flux / 4));
+                    material.SetFloat(radiationFluxProperty, flux);
                     material.SetFloat(lowDynamicRangeProperty, lowDynamicRange);
                     break;
 
                 case MaterialType.Glass:
                     material.SetColor(colorProperty, color);
-                    material.SetFloat(transparencyProperty, transparency);
-                    material.SetFloat(iorProperty, Mathf.Clamp01((1 + ior) / 3));
+                    material.SetFloat(transparencyProperty, transparency == 0 ? 1 : transparency);
+                    material.SetFloat(iorProperty, 1 + ior);
                     material.SetFloat(smoothnessProperty, 1 - roughness);
                     break;
             }
+
             return material;
         }
         public Material CreateCombinedMaterial(MaterialType type, Texture2D baseMap, Texture2D mask)
@@ -121,6 +122,7 @@ namespace Fluorite.Vox.Editor
                     pixels[y * width + x] = colorAt(xyz + sweep);
                 }
             }
+
             texture.SetPixels32(pixels);
             texture.Apply();
             return texture;
@@ -145,19 +147,15 @@ namespace Fluorite.Vox.Editor
                             {
                                 colors[index].r = (byte)(material.GetFloat(metallicProperty) * 255);
                                 colors[index].g = (byte)(material.GetFloat(specularProperty) * 255);
-                                colors[index].b = (byte)(material.GetFloat(iorProperty) * 255);
+                                // colors[index].b = (byte)(material.GetFloat(iorProperty) * 255);
                                 colors[index].a = (byte)(material.GetFloat(smoothnessProperty) * 255);
                             }
+
                             break;
-
-                        case MaterialType.Emission:
-                            throw new NotSupportedException();
-
-                        case MaterialType.Glass:
-                            throw new NotSupportedException();
                     }
                 }
             }
+
             texture.SetPixels32(colors);
             texture.Apply();
             return texture;

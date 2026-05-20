@@ -20,7 +20,7 @@ namespace Fluorite.Vox.Editor
         #region Fields
         [Header("Model")]
         public float scaleFactor = 1;
-        public StaticEditorFlags staticFlags = (StaticEditorFlags)byte.MaxValue;
+        public StaticEditorFlags staticFlags = StaticEditorFlags.ContributeGI | StaticEditorFlags.OccluderStatic | StaticEditorFlags.OccludeeStatic | StaticEditorFlags.BatchingStatic;
         public int baseLayer;
         public string tag;
 
@@ -38,6 +38,7 @@ namespace Fluorite.Vox.Editor
         [Header("Material")]
         public ImportMaterialType importMaterials = ImportMaterialType.Default;
         public bool exportMaterials;
+        public uint renderingLayerMask;
         #endregion
 
         #region Callbacks
@@ -55,16 +56,17 @@ namespace Fluorite.Vox.Editor
             Vox vox = new(assetPath);
             Chunk main = vox.Main;
 
-            Generator generator = new(scaleFactor, staticFlags, baseLayer, generateColliders, convex, importMaterials);
+            Generator generator = new(scaleFactor, staticFlags, baseLayer, generateColliders, convex, importMaterials, renderingLayerMask);
             (List<Shape> shapes, GameObject gameObject) = generator.CreateAssets(main, name);
 
             List<Texture> textures = new();
-            List<Material> materials = new();
+            HashSet<Material> materials = new();
             foreach (Shape shape in shapes)
             {
                 foreach (Texture texture in shape.Textures)
                 {
                     if (textures.Contains(texture)) continue;
+
                     context.AddObjectToAsset(texture.name, texture);
                     textures.Add(texture);
                 }
@@ -75,16 +77,19 @@ namespace Fluorite.Vox.Editor
 
                     if (exportMaterials)
                     {
-                        string folder = Path.Combine(Path.GetDirectoryName(context.assetPath), "Materials");
-                        if (!AssetDatabase.IsValidFolder(folder))
-                            AssetDatabase.CreateFolder(folder, "Materials");
+                        string assetDirectory = Path.GetDirectoryName(context.assetPath);
+                        string materialsFolder = Path.Combine(assetDirectory!, "Materials");
 
-                        AssetDatabase.CreateAsset(material, Path.Combine(folder, $"{material.name}.mat"));
+                        if (!AssetDatabase.IsValidFolder(materialsFolder))
+                            AssetDatabase.CreateFolder(assetDirectory, "Materials");
+
+                        AssetDatabase.CreateAsset(material, Path.Combine(materialsFolder, $"{material.name}.mat"));
                     }
                     else
                     {
                         context.AddObjectToAsset(material.name, material);
                     }
+
                     materials.Add(material);
                 }
 
