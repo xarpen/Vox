@@ -1,12 +1,20 @@
-﻿using System;
+using System;
+using System.Buffers;
 using System.Collections.Generic;
 using System.Linq;
+using System.Runtime.CompilerServices;
 using UnityEngine;
 using UnityEditor;
+using UnityEngine.Pool;
+using UnityEngine.Rendering;
 
 // ReSharper disable PossibleLossOfFraction
-
-namespace System.Runtime.CompilerServices { public class IsExternalInit { } }
+// ReSharper disable BadDeclarationBracesLineBreaks
+namespace System.Runtime.CompilerServices
+{
+    public class IsExternalInit { }
+}
+// ReSharper restore BadDeclarationBracesLineBreaks
 
 namespace Fluorite.Vox.Editor
 {
@@ -20,10 +28,16 @@ namespace Fluorite.Vox.Editor
             const int maxVoxels = XyziChunk.maxVoxels;
             const int maxColors = RgbaChunk.maxColors;
 
-            static readonly Lazy<VoxRenderPipelineAsset> pipelineAssetLazy = new(() => AssetDatabase.FindAssets($"t: {nameof(VoxRenderPipelineAsset)}").Select(x => AssetDatabase.LoadAssetAtPath<VoxRenderPipelineAsset>(AssetDatabase.GUIDToAssetPath(x))).FirstOrDefault() ?? ScriptableObject.CreateInstance<VoxRenderPipelineAsset>());
+            static readonly Lazy<VoxRenderPipelineAsset> pipelineAssetLazy = new(() =>
+            {
+                VoxRenderPipelineAsset asset = AssetDatabase.FindAssets($"t: {nameof(VoxRenderPipelineAsset)}")
+                                                            .Select(x => AssetDatabase.LoadAssetAtPath<VoxRenderPipelineAsset>(AssetDatabase.GUIDToAssetPath(x)))
+                                                            .FirstOrDefault();
+                return asset ? asset : ScriptableObject.CreateInstance<VoxRenderPipelineAsset>();
+            });
             static VoxRenderPipelineAsset PipelineAsset => pipelineAssetLazy.Value;
 
-            class ShapeGenerator
+            class ShapeGenerator : IDisposable
             {
                 record IndexedTextures(int Index, Texture2D Texture, Texture2D Mask);
 
@@ -33,16 +47,16 @@ namespace Fluorite.Vox.Editor
                 readonly Material paletteMaterial;
                 readonly Material[] materials;
                 readonly MaterialType[] materialType;
-                readonly byte[] voxel = new byte[maxVoxels * maxVoxels * maxVoxels];
-                readonly bool[] processed = new bool[maxVoxels * maxVoxels * maxVoxels];
+                readonly byte[] voxel;
+                readonly bool[] processed;
 
                 int index;
-                readonly List<Vector3> vertices = new(ushort.MaxValue);
-                readonly List<Vector3> normals = new(ushort.MaxValue);
-                readonly List<Vector2> uv0 = new(ushort.MaxValue);
-                readonly List<Vector2> uv1 = new(ushort.MaxValue);
+                readonly List<Vector3> vertices;
+                readonly List<Vector3> normals;
+                readonly List<Vector2> uv0;
+                readonly List<Vector2> uv1;
 
-                readonly List<int> paletteTriangles = new();
+                readonly List<int> paletteTriangles;
                 readonly List<int>[] mattersTriangles = new List<int>[maxColors];
                 readonly List<int>[] combinedMattersTriangles = new List<int>[(int)MaterialType.Count];
                 readonly List<IndexedTextures>[] combinedMattersTextures = new List<IndexedTextures>[(int)MaterialType.Count];
@@ -57,6 +71,19 @@ namespace Fluorite.Vox.Editor
                     this.materials = materials;
                     this.materialType = materialType;
 
+                    voxel = ArrayPool<byte>.Shared.Rent(maxVoxels * maxVoxels * maxVoxels);
+                    processed = ArrayPool<bool>.Shared.Rent(maxVoxels * maxVoxels * maxVoxels);
+
+                    Array.Clear(voxel, 0, voxel.Length);
+                    Array.Clear(processed, 0, processed.Length);
+
+                    vertices = ListPool<Vector3>.Get();
+                    normals = ListPool<Vector3>.Get();
+                    uv0 = ListPool<Vector2>.Get();
+                    uv1 = ListPool<Vector2>.Get();
+
+                    paletteTriangles = ListPool<int>.Get();
+
                     for (int i = 0, length = points.Length; i < length; ++i)
                     {
                         byte x = points[i].r;
@@ -68,13 +95,34 @@ namespace Fluorite.Vox.Editor
 
                     for (int i = 0; i < maxColors; ++i)
                     {
-                        if (materials[i]) mattersTriangles[i] = new List<int>(ushort.MaxValue);
+                        if (materials[i]) mattersTriangles[i] = ListPool<int>.Get();
                     }
 
                     for (int i = 0; i < (int)MaterialType.Count; ++i)
                     {
-                        combinedMattersTriangles[i] = new List<int>(ushort.MaxValue);
-                        combinedMattersTextures[i] = new List<IndexedTextures>();
+                        combinedMattersTriangles[i] = ListPool<int>.Get();
+                        combinedMattersTextures[i] = ListPool<IndexedTextures>.Get();
+                    }
+                }
+                public void Dispose()
+                {
+                    if (voxel is not null) ArrayPool<byte>.Shared.Return(voxel);
+                    if (processed is not null) ArrayPool<bool>.Shared.Return(processed);
+                    if (vertices is not null) ListPool<Vector3>.Release(vertices);
+                    if (normals is not null) ListPool<Vector3>.Release(normals);
+                    if (uv0 is not null) ListPool<Vector2>.Release(uv0);
+                    if (uv1 is not null) ListPool<Vector2>.Release(uv1);
+                    if (paletteTriangles is not null) ListPool<int>.Release(paletteTriangles);
+
+                    for (int i = 0; i < maxColors; ++i)
+                    {
+                        if (materials[i]) ListPool<int>.Release(mattersTriangles[i]);
+                    }
+
+                    for (int i = 0; i < (int)MaterialType.Count; ++i)
+                    {
+                        if (combinedMattersTriangles[i] is not null) ListPool<int>.Release(combinedMattersTriangles[i]);
+                        if (combinedMattersTextures[i] is not null) ListPool<IndexedTextures>.Release(combinedMattersTextures[i]);
                     }
                 }
                 #endregion
@@ -83,43 +131,54 @@ namespace Fluorite.Vox.Editor
                 public Shape CreateShape(Vector3Int size, float scaleFactor, ImportMaterialType importMaterials)
                 {
                     Vector3 origin = -new Vector3(size.x / 2.0f, size.y / 2.0f, size.z / 2.0f);
-                    AddSide(size, new[] { 0, 1, 2 }, 0, Vector3Int.left, Vector3.zero + origin, true, scaleFactor, importMaterials); // left
-                    AddSide(size, new[] { 0, 1, 2 }, size.x - 1, Vector3Int.right, Vector3.right + origin, false, scaleFactor, importMaterials); // right
-                    AddSide(size, new[] { 1, 0, 2 }, 0, Vector3Int.down, Vector3.zero + origin, false, scaleFactor, importMaterials); // bottom
-                    AddSide(size, new[] { 1, 0, 2 }, size.y - 1, Vector3Int.up, Vector3.up + origin, true, scaleFactor, importMaterials); // top
-                    AddSide(size, new[] { 2, 0, 1 }, 0, new Vector3Int(0, 0, -1), Vector3.zero + origin, true, scaleFactor, importMaterials); // forward
+                    AddSide(size, new[] { 0, 1, 2 }, 0, Vector3Int.left, Vector3.zero + origin, true, scaleFactor, importMaterials);                      // left
+                    AddSide(size, new[] { 0, 1, 2 }, size.x - 1, Vector3Int.right, Vector3.right + origin, false, scaleFactor, importMaterials);          // right
+                    AddSide(size, new[] { 1, 0, 2 }, 0, Vector3Int.down, Vector3.zero + origin, false, scaleFactor, importMaterials);                     // bottom
+                    AddSide(size, new[] { 1, 0, 2 }, size.y - 1, Vector3Int.up, Vector3.up + origin, true, scaleFactor, importMaterials);                 // top
+                    AddSide(size, new[] { 2, 0, 1 }, 0, new Vector3Int(0, 0, -1), Vector3.zero + origin, true, scaleFactor, importMaterials);             // forward
                     AddSide(size, new[] { 2, 0, 1 }, size.z - 1, new Vector3Int(0, 0, 1), Vector3.forward + origin, false, scaleFactor, importMaterials); // back
 
                     (Texture[] shapeTextures, Material[] shapeMaterials) = CreateMaterials(importMaterials);
-                    return new Shape(CreateMesh(), shapeTextures, shapeMaterials);
+                    return new Shape(CreateMesh(size), shapeTextures, shapeMaterials);
                 }
                 #endregion
 
                 #region Support Methods
+                [MethodImpl(MethodImplOptions.AggressiveInlining)]
                 static int VoxelIndex(Vector3Int xyz) => xyz.x + maxVoxels * (xyz.y + maxVoxels * xyz.z);
+                [MethodImpl(MethodImplOptions.AggressiveInlining)]
                 byte VoxelAt(Vector3Int xyz) => voxel[VoxelIndex(xyz)];
+                [MethodImpl(MethodImplOptions.AggressiveInlining)]
                 Color ColorAt(Vector3Int xyz)
                 {
                     int index = VoxelAt(xyz);
                     return index != 0 ? colors[index - 1] : Color.white;
                 }
+                [MethodImpl(MethodImplOptions.AggressiveInlining)]
                 Material MaterialAt(Vector3Int xyz) => materials[VoxelAt(xyz) - 1];
-                MaterialType MaterialTypeAt(Vector3Int xyz)
-                {
-                    int index = VoxelAt(xyz);
-                    return index != 0 ? materialType[index - 1] : MaterialType.Diffuse;
-                }
                 static bool ImportMaterials(ImportMaterialType importMaterials) => importMaterials > ImportMaterialType.None;
                 static bool ImportCombinedMaterials(ImportMaterialType importMaterials) => importMaterials == ImportMaterialType.BakeEdgeToTexture;
-
                 void AddSide(Vector3Int size, int[] dir, int limit, Vector3Int normal, Vector3 offset, bool inverse, float scaleFactor, ImportMaterialType importMaterials)
                 {
-                    // direction = dir[0]
-                    // width     = dir[1]
-                    // height    = dir[2]
-
-                    int AddEdge(int index, Vector3Int xyz, byte vox, MaterialType materialType, bool combined, Vector3Int voxelsInWidth, Vector3Int voxelsInHeight)
+                    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+                    static bool ShouldRenderFace(byte voxelValue, MaterialType materialAtVoxel, byte neighborVoxel, MaterialType neighborMaterial)
                     {
+                        if (neighborVoxel == 0) return true;
+
+                        bool isGlass = materialAtVoxel == MaterialType.Glass;
+                        bool isNeighborGlass = neighborMaterial == MaterialType.Glass;
+
+                        if (isGlass && isNeighborGlass)
+                            return voxelValue != neighborVoxel;
+
+                        return isGlass || isNeighborGlass;
+                    }
+
+                    int AddEdge(int index, int ay, int az, Vector3Int xyz, byte vox, MaterialType material, bool combined, Vector3Int voxelsInWidth, Vector3Int voxelsInHeight)
+                    {
+                        const float inv8 = 1.0f / 8.0f;
+                        const float invMaxColors = 1.0f / maxColors;
+
                         vertices.Add((xyz + offset) * scaleFactor);
                         vertices.Add((xyz + voxelsInWidth + offset) * scaleFactor);
                         vertices.Add((xyz + voxelsInWidth + voxelsInHeight + offset) * scaleFactor);
@@ -142,7 +201,7 @@ namespace Fluorite.Vox.Editor
                             uv1.Add(new Vector2(1, 1));
                             uv1.Add(new Vector2(0, 1));
 
-                            int materialIndex = (int)materialType;
+                            int materialIndex = (int)material;
                             combinedMattersTriangles[materialIndex].Add(index);
                             combinedMattersTriangles[materialIndex].Add(index + (inverse ? 2 : 1));
                             combinedMattersTriangles[materialIndex].Add(index + (inverse ? 1 : 2));
@@ -150,11 +209,11 @@ namespace Fluorite.Vox.Editor
                             combinedMattersTriangles[materialIndex].Add(index + (inverse ? 3 : 2));
                             combinedMattersTriangles[materialIndex].Add(index + (inverse ? 2 : 3));
                         }
-                        else if (materialType == MaterialType.Diffuse)
+                        else if (material == MaterialType.Diffuse)
                         {
-                            float u = ((vox - 1) % 8) / (float)8;
+                            float u = ((vox - 1) % 8) * inv8;
                             float v = (vox - 1) / 8 / (float)(maxColors / 8);
-                            const float epsilon = 1 / (float)maxColors;
+                            float epsilon = invMaxColors;
 
                             uv0.Add(new Vector2(u, v));
                             uv0.Add(new Vector2(u + epsilon, v));
@@ -175,8 +234,8 @@ namespace Fluorite.Vox.Editor
                         }
                         else
                         {
-                            int uvWidth = voxelsInWidth[dir[1]];
-                            int uvHeight = voxelsInHeight[dir[2]];
+                            int uvWidth = voxelsInWidth[ay];
+                            int uvHeight = voxelsInHeight[az];
 
                             uv0.Add(new Vector2(0, 0));
                             uv0.Add(new Vector2(uvWidth, 0));
@@ -200,160 +259,249 @@ namespace Fluorite.Vox.Editor
                     }
                     void SetProcessed(Vector3Int xyz, Vector3Int processedSize)
                     {
+                        Vector3Int p = xyz;
+                        int baseX = xyz.x;
+                        int baseY = xyz.y;
+                        int baseZ = xyz.z;
+
                         for (int x = 0, sizeX = processedSize.x; x < sizeX; ++x)
+                        {
+                            p.x = baseX + x;
                             for (int y = 0, sizeY = processedSize.y; y < sizeY; ++y)
+                            {
+                                p.y = baseY + y;
                                 for (int z = 0, sizeZ = processedSize.z; z < sizeZ; ++z)
-                                    processed[VoxelIndex(xyz + new Vector3Int(x, y, z))] = true;
+                                {
+                                    p.z = baseZ + z;
+                                    processed[VoxelIndex(p)] = true;
+                                }
+                            }
+                        }
                     }
-                    Vector3Int OffsetByDirection(Vector3Int xyz, int x, int y)
+
+                    // direction = dir[0]
+                    // width     = dir[1]
+                    // height    = dir[2]
+                    int ax = dir[0];
+                    int ay = dir[1];
+                    int az = dir[2];
+                    int sizeAy = size[ay];
+                    int sizeAz = size[az];
+                    bool doCombined = ImportCombinedMaterials(importMaterials);
+                    const int combinedHardSwitchThreshold = 256;
+                    const int combinedSoftSwitchThreshold = 128;
+                    const float combinedSwitchRatioThreshold = 0.25f;
+                    const int combinedMinArea = 64;
+
+                    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+                    Vector2Int GetSameVoxSize(int originX, int originY, int originZ, byte targetVoxel, MaterialType targetMaterial)
                     {
-                        Vector3Int add = default;
-                        add[dir[1]] = x;
-                        add[dir[2]] = y;
-                        return xyz + add;
-                    }
-                    Vector2Int GetSameVoxSize(Vector3Int xyz, byte vox, MaterialType materialType)
-                    {
+                        int originAlongNormal = ax == 0 ? originX : ax == 1 ? originY : originZ;
+                        int originAlongWidth = ay == 0 ? originX : ay == 1 ? originY : originZ;
+                        int originAlongHeight = az == 0 ? originX : az == 1 ? originY : originZ;
+
                         int width = 0;
                         int height = 0;
-                        for (; height <= size[dir[2]] - 1 - xyz[dir[2]]; ++height)
+
+                        for (; height <= sizeAz - 1 - originAlongHeight; ++height)
                         {
-                            Vector3Int sweep = OffsetByDirection(default, 0, height);
-                            for (; sweep[dir[1]] <= size[dir[1]] - 1 - xyz[dir[1]]; ++sweep[dir[1]])
+                            int currentWidth = 0;
+
+                            for (; currentWidth <= sizeAy - 1 - originAlongWidth; ++currentWidth)
                             {
-                                byte voxAtSweep = VoxelAt(xyz + sweep);
-                                if (voxAtSweep == 0) break;
-                                if (processed[VoxelIndex(xyz + sweep)]) break;
-                                if (vox != voxAtSweep) break;
-                                if (xyz[dir[0]] == limit) continue;
+                                int sampleX = originX;
+                                int sampleY = originY;
+                                int sampleZ = originZ;
 
-                                byte voxAtSweepNormal = VoxelAt(xyz + sweep + normal);
-                                if (voxAtSweepNormal == 0) continue;
-                                if (vox == voxAtSweepNormal) break;
+                                if (ay == 0) sampleX += currentWidth;
+                                else if (ay == 1) sampleY += currentWidth;
+                                else sampleZ += currentWidth;
+                                if (az == 0) sampleX += height;
+                                else if (az == 1) sampleY += height;
+                                else sampleZ += height;
 
-                                MaterialType materialAtSweepNormal = MaterialTypeAt(xyz + sweep + normal);
-                                if (materialType == materialAtSweepNormal) break;
-                                if (materialType == MaterialType.Diffuse && materialAtSweepNormal == MaterialType.Metal) break;
-                                if (materialType == MaterialType.Metal && materialAtSweepNormal == MaterialType.Diffuse) break;
+                                int voxelIndex = sampleX + maxVoxels * (sampleY + maxVoxels * sampleZ);
+
+                                byte voxelValue = voxel[voxelIndex];
+                                if (voxelValue == 0) break;
+                                if (processed[voxelIndex]) break;
+                                if (voxelValue != targetVoxel) break;
+
+                                if (originAlongNormal == limit) continue;
+
+                                int neighborIndex = (sampleX + normal.x) + maxVoxels * ((sampleY + normal.y) + maxVoxels * (sampleZ + normal.z));
+                                byte neighborVoxel = voxel[neighborIndex];
+                                if (neighborVoxel == 0) continue;
+                                if (neighborVoxel == targetVoxel) break;
+
+                                MaterialType neighborMaterial = materialType[neighborVoxel - 1];
+                                if (!ShouldRenderFace(voxelValue, targetMaterial, neighborVoxel, neighborMaterial)) break;
+
                             }
 
-                            if (width == 0) width = sweep[dir[1]];
+                            if (width == 0) width = currentWidth;
                             if (width == 0) break;
-                            if (sweep[dir[1]] != width) break;
+                            if (currentWidth != width) break;
                         }
 
                         return new Vector2Int(width, height);
                     }
-                    (Vector2Int, float, float) GetSameMaterialTypeSize(Vector3Int xyz, MaterialType materialType, bool checkAtNormal = true)
+                    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+                    void GetSameMaterialTypeSize(int originX, int originY, int originZ, MaterialType material, bool checkAtNormal, out int width, out int height, out int voxelSwitches, out float switchRatio)
                     {
-                        int width = 0;
-                        int height = 0;
-                        for (; height <= size[dir[2]] - 1 - xyz[dir[2]]; ++height)
+                        int originAlongNormal = ax == 0 ? originX : ax == 1 ? originY : originZ;
+                        int originAlongWidth = ay == 0 ? originX : ay == 1 ? originY : originZ;
+                        int originAlongHeight = az == 0 ? originX : az == 1 ? originY : originZ;
+
+                        width = 0;
+                        height = 0;
+                        voxelSwitches = 0;
+
+                        for (; height <= sizeAz - 1 - originAlongHeight; ++height)
                         {
-                            Vector3Int sweep = OffsetByDirection(default, 0, height);
-                            for (; sweep[dir[1]] <= size[dir[1]] - 1 - xyz[dir[1]]; ++sweep[dir[1]])
+                            int currentWidth = 0;
+                            byte prevInRow = 0;
+
+                            for (; currentWidth <= sizeAy - 1 - originAlongWidth; ++currentWidth)
                             {
-                                byte voxAtSweep = VoxelAt(xyz + sweep);
-                                if (voxAtSweep == 0) break;
-                                if (processed[VoxelIndex(xyz + sweep)]) break;
+                                int sampleX = originX;
+                                int sampleY = originY;
+                                int sampleZ = originZ;
 
-                                MaterialType materialTypeAtSweep = MaterialTypeAt(xyz + sweep);
-                                if (materialType != materialTypeAtSweep) break;
+                                if (ay == 0) sampleX += currentWidth;
+                                else if (ay == 1) sampleY += currentWidth;
+                                else sampleZ += currentWidth;
+                                if (az == 0) sampleX += height;
+                                else if (az == 1) sampleY += height;
+                                else sampleZ += height;
 
-                                if (xyz[dir[0]] == limit || !checkAtNormal) continue;
-                                byte voxAtSweepNormal = VoxelAt(xyz + sweep + normal);
-                                if (voxAtSweepNormal == 0) continue;
+                                int voxelIndex = sampleX + maxVoxels * (sampleY + maxVoxels * sampleZ);
 
-                                if (materialType == MaterialTypeAt(xyz + sweep + normal)) break;
+                                byte voxelValue = voxel[voxelIndex];
+                                if (voxelValue == 0) break;
+                                if (processed[voxelIndex]) break;
+                                if (materialType[voxelValue - 1] != material) break;
 
-                                MaterialType materialAtSweepNormal = MaterialTypeAt(xyz + sweep + normal);
-                                if (materialType == materialAtSweepNormal) break;
-                                if (materialType == MaterialType.Diffuse && materialAtSweepNormal == MaterialType.Metal) break;
-                                if (materialType == MaterialType.Metal && materialAtSweepNormal == MaterialType.Diffuse) break;
+                                if (currentWidth > 0 && voxelValue != prevInRow) voxelSwitches++;
+                                prevInRow = voxelValue;
+
+                                if (height > 0)
+                                {
+                                    int downIndex = (sampleX - (az == 0 ? 1 : 0)) + maxVoxels * ((sampleY - (az == 1 ? 1 : 0)) + maxVoxels * (sampleZ - (az == 2 ? 1 : 0)));
+                                    if (voxelValue != voxel[downIndex]) voxelSwitches++;
+                                }
+
+                                if (originAlongNormal == limit || !checkAtNormal) continue;
+
+                                int neighborIndex = (sampleX + normal.x) + maxVoxels * ((sampleY + normal.y) + maxVoxels * (sampleZ + normal.z));
+                                byte neighborVoxel = voxel[neighborIndex];
+                                if (neighborVoxel == 0) continue;
+                                MaterialType neighborMaterial = materialType[neighborVoxel - 1];
+                                if (!ShouldRenderFace(voxelValue, material, neighborVoxel, neighborMaterial)) break;
                             }
 
-                            if (width == 0) width = sweep[dir[1]];
+                            if (width == 0) width = currentWidth;
                             if (width == 0) break;
-                            if (sweep[dir[1]] != width) break;
+                            if (currentWidth != width) break;
                         }
 
-                        int voxSwitches = 0;
-                        int maxSwitches = width * (height - 1) + (width - 1) * height;
-                        for (int y = 0; y < height; ++y)
-                        {
-                            for (int x = 0; x < width; ++x)
-                            {
-                                byte centerVox = VoxelAt(OffsetByDirection(xyz, x, y));
-                                if (x > 0 && centerVox != VoxelAt(OffsetByDirection(xyz, x - 1, y))) voxSwitches++;
-                                if (y > 0 && centerVox != VoxelAt(OffsetByDirection(xyz, x, y - 1))) voxSwitches++;
-                            }
-                        }
-
-                        return (new Vector2Int(width, height), voxSwitches, maxSwitches == 0 ? maxSwitches : (voxSwitches / (float)maxSwitches));
+                        int maxPossibleSwitches = width * (height - 1) + (width - 1) * height;
+                        switchRatio = maxPossibleSwitches == 0 ? 0f : voxelSwitches / (float)maxPossibleSwitches;
                     }
 
-                    for (int x = 0, sizeX = size.x; x < sizeX; ++x)
-                        for (int y = 0, sizeY = size.y; y < sizeY; ++y)
-                            for (int z = 0, sizeZ = size.z; z < sizeZ; ++z)
-                            {
-                                Vector3Int xyz = new(x, y, z);
-                                int voxelIndex = VoxelIndex(xyz);
-                                byte vox = voxel[voxelIndex];
+                    int normalStride = normal.x + maxVoxels * (normal.y + maxVoxels * normal.z);
 
-                                if (vox == 0) continue;
+                    for (int z = 0, sizeZ = size.z; z < sizeZ; ++z)
+                    {
+                        int zBase = maxVoxels * maxVoxels * z;
+
+                        for (int y = 0, sizeY = size.y; y < sizeY; ++y)
+                        {
+                            int yzBase = zBase + maxVoxels * y;
+
+                            for (int x = 0, sizeX = size.x; x < sizeX; ++x)
+                            {
+                                int voxelIndex = yzBase + x;
+                                byte voxelValue = voxel[voxelIndex];
+
+                                if (voxelValue == 0) continue;
                                 if (processed[voxelIndex]) continue;
 
-                                MaterialType materialType = MaterialTypeAt(xyz);
+                                Vector3Int xyz = new(x, y, z);
+                                MaterialType materialAtVoxel = materialType[voxelValue - 1];
 
-                                Vector2Int sameVoxSize = GetSameVoxSize(xyz, vox, materialType);
-                                (Vector2Int sameMaterialSize, float sameMaterialSwitches, float sameMaterialRatio) = GetSameMaterialTypeSize(xyz, materialType);
-                                (Vector2Int sameMaterialNoLimitSize, float sameMaterialNoLimitSwitches, float _) = GetSameMaterialTypeSize(xyz, materialType, false);
+                                int alongNormal = ax == 0 ? x : ax == 1 ? y : z;
+                                if (alongNormal != limit)
+                                {
+                                    byte neighborVoxel = voxel[voxelIndex + normalStride];
+                                    MaterialType neighborMaterial = neighborVoxel == 0 ? default : materialType[neighborVoxel - 1];
+                                    if (!ShouldRenderFace(voxelValue, materialAtVoxel, neighborVoxel, neighborMaterial)) continue;
+                                }
+
                                 Vector3Int voxelsInWidth = default;
                                 Vector3Int voxelsInHeight = default;
 
-                                if (ImportCombinedMaterials(importMaterials) && (sameMaterialNoLimitSwitches > 256) && sameMaterialNoLimitSize.magnitude > 8)
+                                bool canCombine = doCombined && (materialAtVoxel == MaterialType.Diffuse || materialAtVoxel == MaterialType.Metal);
+                                if (canCombine)
                                 {
-                                    voxelsInWidth[dir[1]] = sameMaterialNoLimitSize.x;
-                                    voxelsInHeight[dir[2]] = sameMaterialNoLimitSize.y;
+                                    GetSameMaterialTypeSize(x, y, z, materialAtVoxel, false, out int noLimitMaterialWidth, out int noLimitMaterialHeight, out int noLimitMaterialSwitches, out _);
+                                    Vector2Int sameMaterialNoLimitRegion = new(noLimitMaterialWidth, noLimitMaterialHeight);
 
-                                    combinedMattersTextures[(int)materialType].Add(new IndexedTextures(index, VoxRenderPipelineAsset.CreateCombinedBaseMap(xyz, dir, voxelsInWidth[dir[1]], voxelsInHeight[dir[2]], ColorAt), PipelineAsset.CreateCombinedMask(materialType, xyz, dir, voxelsInWidth[dir[1]], voxelsInHeight[dir[2]], MaterialAt)));
+                                    bool hardCombinedCandidate = noLimitMaterialSwitches > combinedHardSwitchThreshold && sameMaterialNoLimitRegion.sqrMagnitude > combinedMinArea;
+                                    if (hardCombinedCandidate)
+                                    {
+                                        voxelsInWidth[ay] = sameMaterialNoLimitRegion.x;
+                                        voxelsInHeight[az] = sameMaterialNoLimitRegion.y;
 
-                                    index = AddEdge(index, xyz, vox, materialType, true, voxelsInWidth, voxelsInHeight);
+                                        combinedMattersTextures[(int)materialAtVoxel].Add(new IndexedTextures(index, VoxRenderPipelineAsset.CreateCombinedBaseMap(xyz, dir, voxelsInWidth[ay], voxelsInHeight[az], ColorAt), PipelineAsset.CreateCombinedMask(materialAtVoxel, xyz, dir, voxelsInWidth[ay], voxelsInHeight[az], MaterialAt)));
+                                        index = AddEdge(index, ay, az, xyz, voxelValue, materialAtVoxel, true, voxelsInWidth, voxelsInHeight);
+
+                                        goto setProcessed;
+                                    }
+
+                                    GetSameMaterialTypeSize(x, y, z, materialAtVoxel, true, out int materialWidth, out int materialHeight, out int materialSwitches, out float materialSwitchRatio);
+                                    Vector2Int sameMaterialRegion = new(materialWidth, materialHeight);
+
+                                    bool softCombinedCandidate = (materialSwitches > combinedSoftSwitchThreshold || materialSwitchRatio > combinedSwitchRatioThreshold) && sameMaterialRegion.sqrMagnitude > combinedMinArea;
+                                    if (softCombinedCandidate)
+                                    {
+                                        voxelsInWidth[ay] = sameMaterialRegion.x;
+                                        voxelsInHeight[az] = sameMaterialRegion.y;
+
+                                        combinedMattersTextures[(int)materialAtVoxel].Add(new IndexedTextures(index, VoxRenderPipelineAsset.CreateCombinedBaseMap(xyz, dir, voxelsInWidth[ay], voxelsInHeight[az], ColorAt), PipelineAsset.CreateCombinedMask(materialAtVoxel, xyz, dir, voxelsInWidth[ay], voxelsInHeight[az], MaterialAt)));
+                                        index = AddEdge(index, ay, az, xyz, voxelValue, materialAtVoxel, true, voxelsInWidth, voxelsInHeight);
+
+                                        goto setProcessed;
+                                    }
                                 }
-                                else if (ImportCombinedMaterials(importMaterials) && (sameMaterialSwitches > 128 || sameMaterialRatio > 0.25f) && sameMaterialSize.magnitude > 8)
-                                {
-                                    voxelsInWidth[dir[1]] = sameMaterialSize.x;
-                                    voxelsInHeight[dir[2]] = sameMaterialSize.y;
 
-                                    combinedMattersTextures[(int)materialType].Add(new IndexedTextures(index, VoxRenderPipelineAsset.CreateCombinedBaseMap(xyz, dir, voxelsInWidth[dir[1]], voxelsInHeight[dir[2]], ColorAt), PipelineAsset.CreateCombinedMask(materialType, xyz, dir, voxelsInWidth[dir[1]], voxelsInHeight[dir[2]], MaterialAt)));
+                                Vector2Int sameVoxelRegion = GetSameVoxSize(x, y, z, voxelValue, materialAtVoxel);
+                                if (sameVoxelRegion.sqrMagnitude <= 0) continue;
 
-                                    index = AddEdge(index, xyz, vox, materialType, true, voxelsInWidth, voxelsInHeight);
-                                }
-                                else if (sameVoxSize.magnitude > 0)
-                                {
-                                    voxelsInWidth[dir[1]] = sameVoxSize.x;
-                                    voxelsInHeight[dir[2]] = sameVoxSize.y;
+                                voxelsInWidth[ay] = sameVoxelRegion.x;
+                                voxelsInHeight[az] = sameVoxelRegion.y;
 
-                                    index = AddEdge(index, xyz, vox, materialType, false, voxelsInWidth, voxelsInHeight);
-                                }
-                                else
-                                {
-                                    continue;
-                                }
+                                index = AddEdge(index, ay, az, xyz, voxelValue, materialAtVoxel, false, voxelsInWidth, voxelsInHeight);
 
+                            setProcessed:
                                 Vector3Int processSize = default;
-                                processSize[dir[0]] = 1;
-                                processSize[dir[1]] = voxelsInWidth[dir[1]];
-                                processSize[dir[2]] = voxelsInHeight[dir[2]];
+                                processSize[ax] = 1;
+                                processSize[ay] = voxelsInWidth[ay];
+                                processSize[az] = voxelsInHeight[az];
                                 SetProcessed(xyz, processSize);
                             }
+                        }
+                    }
 
                     Array.Clear(processed, 0, processed.Length);
                 }
-
-                Mesh CreateMesh()
+                Mesh CreateMesh(Vector3Int size)
                 {
-                    Mesh mesh = new();
+                    Mesh mesh = new() { name = $"{size.x}x{size.y}x{size.z}" };
+
+                    if (vertices.Count >= ushort.MaxValue)
+                        mesh.indexFormat = IndexFormat.UInt32;
+
                     mesh.SetVertices(vertices);
                     mesh.SetNormals(normals);
                     mesh.SetUVs(0, uv0);
@@ -387,7 +535,6 @@ namespace Fluorite.Vox.Editor
                             mesh.SetTriangles(triangles, subMeshIndex++);
 
                     mesh.RecalculateBounds();
-                    mesh.RecalculateTangents();
 
                     return mesh;
                 }
@@ -407,8 +554,10 @@ namespace Fluorite.Vox.Editor
                     for (int i = 0; i < combinedMattersTriangles.Length; ++i)
                     {
                         if (!ImportCombinedMaterials(importMaterials) || combinedMattersTriangles[i].Count <= 0) continue;
+
                         if (i == 0) textureCount++;
                         else textureCount += 2;
+
                         materialCount++;
                     }
 
@@ -463,10 +612,11 @@ namespace Fluorite.Vox.Editor
             readonly bool generateColliders;
             readonly bool convex;
             readonly ImportMaterialType importMaterials;
+            readonly uint renderingLayerMask;
             #endregion
 
             #region Constructors
-            internal Generator(float scaleFactor, StaticEditorFlags staticFlags, int baseLayer, bool generateColliders, bool convex, ImportMaterialType importMaterials)
+            internal Generator(float scaleFactor, StaticEditorFlags staticFlags, int baseLayer, bool generateColliders, bool convex, ImportMaterialType importMaterials, uint renderingLayerMask)
             {
                 this.scaleFactor = scaleFactor;
                 this.generateColliders = generateColliders;
@@ -474,6 +624,7 @@ namespace Fluorite.Vox.Editor
                 this.staticFlags = staticFlags;
                 this.baseLayer = baseLayer;
                 this.importMaterials = importMaterials;
+                this.renderingLayerMask = renderingLayerMask;
             }
             #endregion
 
@@ -497,6 +648,7 @@ namespace Fluorite.Vox.Editor
                 foreach (MaterialChunk chunk in main.Children.OfType<MaterialChunk>())
                 {
                     if (chunk.MaterialType == MaterialType.Diffuse) continue;
+
                     byte index = (byte)(chunk.Index - 1);
                     Color color = colors[index];
                     materials[index] = PipelineAsset.CreateMaterial(index, chunk.MaterialType, color, chunk.Roughness, chunk.IOR, chunk.Specular, chunk.Metal, chunk.Emission, chunk.Flux, chunk.LowDynamicRange, chunk.Transparency);
@@ -508,12 +660,13 @@ namespace Fluorite.Vox.Editor
                 {
                     if (main.Children[i - 1] is not SizeChunk sizeChunk || main.Children[i] is not XyziChunk xyziChunk) continue;
 
-                    ShapeGenerator generator = new(colors, palette, paletteMaterial, materials, materialType, xyziChunk.Points);
+                    using ShapeGenerator generator = new(colors, palette, paletteMaterial, materials, materialType, xyziChunk.Points);
                     Vector3Int size = new(sizeChunk.Size.x, sizeChunk.Size.z, sizeChunk.Size.y);
                     shapes.Add(generator.CreateShape(size, scaleFactor, importMaterials));
                 }
 
-                for (int i = 0; i < shapes.Count; ++i) shapes[i].Mesh.name = $"Shape {i + 1}";
+                foreach (Shape shape in shapes)
+                    shape.Mesh.name = $"Shape {shape.Mesh.name}";
 
                 TransformChunk transform = (TransformChunk)main.Children.FirstOrDefault(x => x is TransformChunk);
                 List<Chunk> nobjects = new();
@@ -561,18 +714,18 @@ namespace Fluorite.Vox.Editor
             #region Support Methods
             GameObject CreateGameObject(string name, Vector3 position, Vector3 rotation, Vector3 scale, int transformLayer, Transform parent)
             {
-                GameObject gameObject = new(name ?? "Shape");
+                GameObject gameObject = new(name ?? "Shape" + (parent ? $" {parent.childCount}" : ""));
                 gameObject.transform.SetParent(parent);
                 GameObjectUtility.SetStaticEditorFlags(gameObject, staticFlags);
 
                 gameObject.transform.localPosition = position * scaleFactor;
-                gameObject.transform.rotation = Quaternion.Euler(rotation);
+                gameObject.transform.localRotation = Quaternion.Euler(rotation);
                 gameObject.transform.localScale = scale;
                 if (baseLayer >= 0 && transformLayer >= 0) gameObject.layer = baseLayer + transformLayer;
 
                 return gameObject;
             }
-            GameObject CreateGameObject(string name, Vector3 position, Vector3 rotation, Vector3 scale, int transformLayer, Mesh mesh, Material[] materials, Transform parent)
+            GameObject CreateGameObject(string name, Vector3 position, Vector3 rotation, Vector3 scale, int transformLayer, uint renderingLayerMask, Mesh mesh, Material[] materials, Transform parent)
             {
                 GameObject gameObject = CreateGameObject(name,
                                                          parent ? position : Vector3.zero,
@@ -581,7 +734,10 @@ namespace Fluorite.Vox.Editor
                                                          transformLayer, parent);
 
                 gameObject.AddComponent<MeshFilter>().sharedMesh = mesh;
-                gameObject.AddComponent<MeshRenderer>().sharedMaterials = materials;
+
+                MeshRenderer meshRenderer = gameObject.AddComponent<MeshRenderer>();
+                meshRenderer.sharedMaterials = materials;
+                if (renderingLayerMask > 0) meshRenderer.renderingLayerMask = renderingLayerMask;
 
                 if (generateColliders)
                 {
@@ -590,9 +746,13 @@ namespace Fluorite.Vox.Editor
                     collider.convex = convex;
                 }
 
-                if (!parent)
+                if (!parent) // Bake position and rotation for root object
                 {
                     Vector3 offset = position * scaleFactor;
+                    //if ((int)(mesh.bounds.size.x / scaleFactor) % 2 == 1) offset += scaleFactor / 2 * Vector3.right;
+                    if ((int)(mesh.bounds.size.y / scaleFactor) % 2 == 1) offset += scaleFactor / 2 * Vector3.up;
+                    //if ((int)(mesh.bounds.size.z / scaleFactor) % 2 == 1) offset += scaleFactor / 2 * Vector3.forward;
+
                     Vector3[] vertices = mesh.vertices;
                     Vector3[] normals = mesh.normals;
                     Quaternion rot = Quaternion.Euler(rotation);
@@ -624,7 +784,7 @@ namespace Fluorite.Vox.Editor
 
                     if (objects[transform.Reference] is ShapeChunk shape)
                     {
-                        return CreateGameObject(transform.Name, transform.Position, transform.EulerAngles, transform.Scale, transform.Layer, shapes[shape.ShapeIndex].Mesh, shapes[shape.ShapeIndex].Materials, parent);
+                        return CreateGameObject(transform.Name, transform.Position, transform.EulerAngles, transform.Scale, transform.Layer, renderingLayerMask, shapes[shape.ShapeIndex].Mesh, shapes[shape.ShapeIndex].Materials, parent);
                     }
 
                     throw new NotSupportedException();
