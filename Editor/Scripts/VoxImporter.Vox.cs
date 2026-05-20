@@ -2,7 +2,6 @@
 using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
-using System.Runtime.InteropServices;
 using System.Text;
 using UnityEngine;
 
@@ -25,34 +24,38 @@ namespace Fluorite.Vox.Editor
         // ReSharper disable InconsistentNaming
         public enum Type
         {
-            Main = 1313423693,
-            Pack = 1262698832,
-            Size = 1163544915,
-            Xyzi = 1230657880,
-            nTrn = 1314018414,
-            nGrp = 1347569518,
-            nShp = 1346917230,
-            Layr = 1381581132,
-            Rgba = 1094862674,
-            Matt = 1414807885,
-            Matl = 1280590157,
-            rLit = 1414089842,
-            rAir = 1380532594,
-            rLen = 1313164402,
-            Post = 1414745936,
-            rDis = 1397310578,
-            rObj = 1245859698,
-            rCam = 1296122738,
-            Note = 1163153230,
-            iMap = 1346456905
+            Main = 'M' | ('A' << 8) | ('I' << 16) | ('N' << 24),
+            Pack = 'P' | ('A' << 8) | ('C' << 16) | ('K' << 24),
+            Size = 'S' | ('I' << 8) | ('Z' << 16) | ('E' << 24),
+            Xyzi = 'X' | ('Y' << 8) | ('Z' << 16) | ('I' << 24),
+
+            nTrn = 'n' | ('T' << 8) | ('R' << 16) | ('N' << 24),
+            nGrp = 'n' | ('G' << 8) | ('R' << 16) | ('P' << 24),
+            nShp = 'n' | ('S' << 8) | ('H' << 16) | ('P' << 24),
+            Layr = 'L' | ('A' << 8) | ('Y' << 16) | ('R' << 24),
+
+            Rgba = 'R' | ('G' << 8) | ('B' << 16) | ('A' << 24),
+            Matt = 'M' | ('A' << 8) | ('T' << 16) | ('T' << 24),
+            Matl = 'M' | ('A' << 8) | ('T' << 16) | ('L' << 24),
+
+            rLit = 'r' | ('L' << 8) | ('I' << 16) | ('T' << 24),
+            rAir = 'r' | ('A' << 8) | ('I' << 16) | ('R' << 24),
+            rLen = 'r' | ('L' << 8) | ('E' << 16) | ('N' << 24),
+            Post = 'P' | ('O' << 8) | ('S' << 16) | ('T' << 24),
+
+            rDis = 'r' | ('D' << 8) | ('I' << 16) | ('S' << 24),
+            rObj = 'r' | ('O' << 8) | ('B' << 16) | ('J' << 24),
+            rCam = 'r' | ('C' << 8) | ('A' << 16) | ('M' << 24),
+
+            Note = 'N' | ('O' << 8) | ('T' << 16) | ('E' << 24),
+            iMap = 'I' | ('M' << 8) | ('A' << 16) | ('P' << 24),
         }
 
         protected const string zero = "0";
         protected const string one = "1";
+        protected const int color32Size = 4 * sizeof(byte);
 
         #region Fields
-        static readonly byte[] buffer = new byte[byte.MaxValue];
-
         int numBytes;
         int numBytesChildren;
         byte[] bytes;
@@ -75,12 +78,16 @@ namespace Fluorite.Vox.Editor
             numBytes = reader.ReadInt32();
             numBytesChildren = reader.ReadInt32();
 
+            Children.Capacity = Mathf.Clamp(numBytesChildren / 32, 0, 1000);
+
             long bodyPosition = reader.BaseStream.Position;
             ReadBody(reader);
-            if (reader.BaseStream.Position != bodyPosition + numBytes)
+            long expected = bodyPosition + numBytes;
+            long actual = reader.BaseStream.Position;
+            if (actual != expected)
             {
-                reader.BaseStream.Position = bodyPosition + numBytes;
-                Debug.LogWarning($"[{nameof(Vox)}] Body unaligned!");
+                reader.BaseStream.Position = expected;
+                Debug.LogWarning($"[{nameof(Vox)}] Body unaligned! Expected={expected} actual={actual}");
             }
 
             long childrenPosition = reader.BaseStream.Position;
@@ -174,7 +181,9 @@ namespace Fluorite.Vox.Editor
             }
 
             if (reader.BaseStream.Position == childrenPosition + numBytesChildren) return;
+
             reader.BaseStream.Position = childrenPosition + numBytesChildren;
+
             Debug.LogWarning($"[{nameof(Vox)}] Children unaligned!");
         }
         public void Write(BinaryWriter writer)
@@ -192,53 +201,114 @@ namespace Fluorite.Vox.Editor
         #endregion
 
         #region Support Methods
-        protected static int KeyValueSize(string name, string value) => sizeof(int) * 2 + (name.Length + value.Length) * sizeof(byte);
-        protected KeyValuePair<string, string> ReadKeyValue(BinaryReader reader)
+        protected static int KeyValueSize(string name, string value) => sizeof(int) * 2 + (Encoding.ASCII.GetByteCount(name) + Encoding.ASCII.GetByteCount(value));
+        protected void ReadKeyValue(BinaryReader reader, out string key, out string value)
         {
-            string key = GetString(reader);
-            string value = GetString(reader);
-            return new KeyValuePair<string, string>(key, value);
+            key = GetString(reader);
+            value = GetString(reader);
         }
         protected void WriteKeyValue(BinaryWriter writer, string name, string value)
         {
-            writer.Write(name.Length);
-            writer.Write(buffer, 0, GetBytes(name));
-            writer.Write(value.Length);
-            writer.Write(buffer, 0, GetBytes(value));
+            int nameLength = Encoding.ASCII.GetByteCount(name);
+            Span<byte> nameBuffer = stackalloc byte[nameLength];
+
+            writer.Write(nameLength);
+            Encoding.ASCII.GetBytes(name, nameBuffer);
+            writer.Write(nameBuffer);
+
+            int valueLength = Encoding.ASCII.GetByteCount(value);
+            Span<byte> valueBuffer = stackalloc byte[valueLength];
+
+            writer.Write(valueLength);
+            Encoding.ASCII.GetBytes(value, valueBuffer);
+            writer.Write(valueBuffer);
         }
 
-        protected static uint ReadUInt(string value) => uint.Parse(value, CultureInfo.InvariantCulture);
-        protected static int ReadInt(string value) => int.Parse(value, CultureInfo.InvariantCulture);
+        static void NextToken(ref ReadOnlySpan<char> span, out ReadOnlySpan<char> token)
+        {
+            int i = span.IndexOf(' ');
+            if (i < 0)
+            {
+                token = span;
+                span = ReadOnlySpan<char>.Empty;
+                return;
+            }
+
+            token = span.Slice(0, i);
+            span = span.Slice(i + 1);
+        }
+        static byte ReadByte(ReadOnlySpan<char> span)
+        {
+            return byte.Parse(span);
+        }
+        protected static int ReadInt(ReadOnlySpan<char> span)
+        {
+            return int.Parse(span, NumberStyles.Integer, CultureInfo.InvariantCulture);
+        }
         protected static string WriteInt(int value) => value.ToString(CultureInfo.InvariantCulture);
-        protected static float ReadFloat(string value) => float.Parse(value, CultureInfo.InvariantCulture);
+        protected static float ReadFloat(ReadOnlySpan<char> span) => float.Parse(span, NumberStyles.Float);
         protected static string WriteFloat(float value) => value.ToString(CultureInfo.InvariantCulture);
         protected static Vector3 ReadVector3(string value)
         {
-            float[] array = Array.ConvertAll(value.Split(' '), ReadFloat);
-            return new Vector3(array[0], array[2], array[1]);
+            ReadOnlySpan<char> span = value;
+
+            NextToken(ref span, out ReadOnlySpan<char> x);
+            NextToken(ref span, out ReadOnlySpan<char> y);
+            NextToken(ref span, out ReadOnlySpan<char> z);
+
+            float fx = ReadFloat(x);
+            float fy = ReadFloat(y);
+            float fz = ReadFloat(z);
+
+            return new Vector3(fx, fz, fy);
         }
         protected static string WriteVector3(Vector3 value) => $"{value.x} {value.z} {value.y}";
         protected static Vector2 ReadVector2(string value)
         {
-            float[] array = Array.ConvertAll(value.Split(' '), ReadFloat);
-            return new Vector2(array[0], array[1]);
+            ReadOnlySpan<char> span = value;
+
+            NextToken(ref span, out ReadOnlySpan<char> x);
+            NextToken(ref span, out ReadOnlySpan<char> y);
+
+            return new Vector2(ReadFloat(x), ReadFloat(y));
         }
         protected static string WriteVector2(Vector2 value) => $"{value.x} {value.y}";
         protected static Color32 ReadColor32(string value)
         {
-            byte[] array = Array.ConvertAll(value.Split(' '), byte.Parse);
-            return new Color32(array[0], array[1], array[2], 255);
+            ReadOnlySpan<char> span = value;
+
+            NextToken(ref span, out ReadOnlySpan<char> r);
+            NextToken(ref span, out ReadOnlySpan<char> g);
+            NextToken(ref span, out ReadOnlySpan<char> b);
+
+            return new Color32(ReadByte(r), ReadByte(g), ReadByte(b), 255);
         }
         protected static string WriteColor32(Color32 value) => $"{value.r} {value.g} {value.b}";
 
-        protected static string GetString(BinaryReader reader)
+        static string GetString(BinaryReader reader)
         {
             int size = reader.ReadInt32();
-            reader.BaseStream.Read(buffer, 0, size);
-            return Encoding.ASCII.GetString(buffer, 0, size);
+            if (size <= 256)
+            {
+                Span<byte> tmp = stackalloc byte[size];
+                reader.Read(tmp);
+                return Encoding.ASCII.GetString(tmp);
+            }
+
+            byte[] rented = System.Buffers.ArrayPool<byte>.Shared.Rent(size);
+            try
+            {
+                int read = reader.Read(rented, 0, size);
+                if (read != size) throw new EndOfStreamException();
+
+                return Encoding.ASCII.GetString(rented, 0, size);
+            }
+            finally
+            {
+                System.Buffers.ArrayPool<byte>.Shared.Return(rented);
+            }
         }
         protected static string GetString(byte[] bytes) => Encoding.ASCII.GetString(bytes);
-        protected static int GetBytes(string value) => Encoding.ASCII.GetBytes(value, 0, value.Length, buffer, 0);
         protected static int Count<T>(params T[] values)
         {
             int total = 0;
@@ -270,7 +340,7 @@ namespace Fluorite.Vox.Editor
     public class SizeChunk : Chunk
     {
         #region Properties
-        protected override int NumBytes => Marshal.SizeOf<Vector3Int>();
+        protected override int NumBytes => 3 * sizeof(int);
         public Vector3Int Size { get; private set; }
         #endregion
 
@@ -302,26 +372,23 @@ namespace Fluorite.Vox.Editor
     {
         public const int maxVoxels = 256;
 
-        #region Fields
-        static readonly byte[] buffer = new byte[maxVoxels * maxVoxels * maxVoxels * (Marshal.SizeOf<Color32>() / sizeof(byte))];
-        #endregion
-
         #region Properties
-        protected override int NumBytes => sizeof(int) + Points.Length * Marshal.SizeOf<Color32>();
+        protected override int NumBytes => sizeof(int) + Points.Length * color32Size;
         public Color32[] Points { get; private set; }
         #endregion
 
         #region Methods
         protected override void ReadBody(BinaryReader reader)
         {
-            Points = new Color32[reader.ReadInt32()];
+            int count = reader.ReadInt32();
+            Points = new Color32[count];
 
-            int size = Points.Length * Marshal.SizeOf<Color32>();
-            reader.BaseStream.Read(buffer, 0, size);
-
-            unsafe
+            Span<byte> rgba = stackalloc byte[4];
+            for (int i = 0; i < count; i++)
             {
-                fixed (void* source = buffer, destination = Points) Buffer.MemoryCopy(source, destination, size, size);
+                reader.Read(rgba);
+
+                Points[i] = new Color32(rgba[0], rgba[1], rgba[2], rgba[3]);
             }
         }
         protected override void WriteBody(BinaryWriter writer)
@@ -343,7 +410,7 @@ namespace Fluorite.Vox.Editor
         public const int maxColors = 256;
 
         #region Properties
-        protected override int NumBytes => maxColors * Marshal.SizeOf<Color32>();
+        protected override int NumBytes => maxColors * color32Size;
         public Color32[] Colors { get; } = new Color32[maxColors];
         #endregion
 
@@ -392,10 +459,10 @@ namespace Fluorite.Vox.Editor
             ElementIndex = reader.ReadInt32();
             for (int i = 0, length = reader.ReadInt32(); i < length; ++i)
             {
-                KeyValuePair<string, string> keyValue = ReadKeyValue(reader);
-                if (keyValue.Key == name) Name = keyValue.Value;
-                else if (keyValue.Key == hidden) Hidden = ReadInt(keyValue.Value) != 0;
-                else throw new ArgumentOutOfRangeException($"Invalid key={keyValue.Key} value={keyValue.Value}");
+                ReadKeyValue(reader, out string key, out string value);
+                if (key == name) Name = value;
+                else if (key == hidden) Hidden = ReadInt(value) != 0;
+                else throw new ArgumentOutOfRangeException($"Invalid key={key} value={value}");
             }
         }
         protected override void WriteBody(BinaryWriter writer)
@@ -484,10 +551,10 @@ namespace Fluorite.Vox.Editor
 
             for (int i = 0, length = reader.ReadInt32(); i < length; ++i)
             {
-                KeyValuePair<string, string> keyValue = ReadKeyValue(reader);
-                if (keyValue.Key == r) Read_r(keyValue.Value);
-                else if (keyValue.Key == t) Position = ReadVector3(keyValue.Value);
-                else throw new ArgumentOutOfRangeException($"Invalid key={keyValue.Key} value={keyValue.Value}");
+                ReadKeyValue(reader, out string key, out string value);
+                if (key == r) Read_r(value);
+                else if (key == t) Position = ReadVector3(value);
+                else throw new ArgumentOutOfRangeException($"Invalid key={key} value={value}");
             }
         }
         protected override void WriteBody(BinaryWriter writer)
@@ -568,6 +635,8 @@ namespace Fluorite.Vox.Editor
         }
         string Write_r()
         {
+            if (EulerAngles != Vector3.zero || Scale != Vector3.one)
+                throw new NotSupportedException("Writing rotations not implemented");
             /*
             int WriteRotation(Matrix4x4 matrix)
             {
@@ -659,7 +728,7 @@ namespace Fluorite.Vox.Editor
     public class LayerChunk : Chunk
     {
         const string name = "_name";
-        const string hidden = "_name";
+        const string hidden = "_hidden";
         const string color = "_color";
 
         #region Fields
@@ -691,11 +760,11 @@ namespace Fluorite.Vox.Editor
             Index = reader.ReadInt32();
             for (int i = 0, length = reader.ReadInt32(); i < length; ++i)
             {
-                KeyValuePair<string, string> keyValue = ReadKeyValue(reader);
-                if (keyValue.Key == name) Name = keyValue.Value;
-                else if (keyValue.Key == hidden) Hidden = ReadInt(keyValue.Value) != 0;
-                else if (keyValue.Key == color) Color = ReadColor32(keyValue.Value);
-                else throw new ArgumentOutOfRangeException($"Invalid key={keyValue.Key} value={keyValue.Value}");
+                ReadKeyValue(reader, out string key, out string value);
+                if (key == name) Name = value;
+                else if (key == hidden) Hidden = ReadInt(value) != 0;
+                else if (key == color) Color = ReadColor32(value);
+                else throw new ArgumentOutOfRangeException($"Invalid key={key} value={value}");
             }
 
             bytes = reader.ReadBytes(Remainder((int)(reader.BaseStream.Position - position)));
@@ -706,7 +775,9 @@ namespace Fluorite.Vox.Editor
             writer.Write(Count(Name, string.Empty) + Count(Hidden, false));
             if (Name != string.Empty) WriteKeyValue(writer, name, Name);
             if (Hidden) WriteKeyValue(writer, hidden, one);
-            if (Color.GetHashCode() != default(Color32).GetHashCode()) WriteKeyValue(writer, color, WriteColor32(Color));
+            // ReSharper disable UsageOfDefaultStructEquality
+            if (!Color.Equals(default(Color32))) WriteKeyValue(writer, color, WriteColor32(Color));
+            // ReSharper restore UsageOfDefaultStructEquality
 
             writer.Write(bytes);
         }
@@ -777,54 +848,54 @@ namespace Fluorite.Vox.Editor
             Index = (byte)reader.ReadInt32();
             for (int i = 0, length = reader.ReadInt32(); i < length; ++i)
             {
-                KeyValuePair<string, string> keyValue = ReadKeyValue(reader);
-                if (keyValue.Key == type)
+                ReadKeyValue(reader, out string key, out string value);
+                if (key == type)
                 {
-                    if (keyValue.Value == diffuse) MaterialType = MaterialType.Diffuse;
-                    else if (keyValue.Value == metal) MaterialType = MaterialType.Metal;
-                    else if (keyValue.Value == glass) MaterialType = MaterialType.Glass;
-                    else if (keyValue.Value == emit) MaterialType = MaterialType.Emission;
+                    if (value == diffuse) MaterialType = MaterialType.Diffuse;
+                    else if (value == metal) MaterialType = MaterialType.Metal;
+                    else if (value == glass) MaterialType = MaterialType.Glass;
+                    else if (value == emit) MaterialType = MaterialType.Emission;
                     else throw new ArgumentOutOfRangeException($"Invalid type={MaterialType}");
                 }
                 else
                 {
-                    if (keyValue.Key == weight)
+                    if (key == weight)
                     {
                         switch (MaterialType)
                         {
                             case MaterialType.Diffuse:
-                                if (ReadFloat(keyValue.Value) != 1) Debug.LogWarning($"Invalid key={keyValue.Key} value={keyValue.Value}");
+                                if (ReadFloat(value) != 1) Debug.LogWarning($"Invalid key={key} value={value}");
                                 break;
 
                             case MaterialType.Glass:
-                                Transparency = ReadFloat(keyValue.Value);
+                                Transparency = ReadFloat(value);
                                 break;
 
                             case MaterialType.Metal:
-                                Metal = ReadFloat(keyValue.Value);
+                                Metal = ReadFloat(value);
                                 break;
 
                             case MaterialType.Emission:
-                                Emission = ReadFloat(keyValue.Value);
+                                Emission = ReadFloat(value);
                                 break;
 
                             default:
-                                Debug.LogWarning($"Invalid key={keyValue.Key} value={keyValue.Value}");
+                                Debug.LogWarning($"Invalid key={key} value={value}");
                                 break;
                         }
                     }
-                    else if (keyValue.Key == rough) Roughness = ReadFloat(keyValue.Value);
-                    else if (keyValue.Key == ior) IOR = ReadFloat(keyValue.Value);
-                    else if (keyValue.Key == ri) RI = ReadFloat(keyValue.Value);
-                    else if (keyValue.Key == sp) Specular = ReadFloat(keyValue.Value);
-                    else if (keyValue.Key == metal) Metal = ReadFloat(keyValue.Value);
-                    else if (keyValue.Key == emit) Emission = ReadFloat(keyValue.Value);
-                    else if (keyValue.Key == flux) Flux = ReadFloat(keyValue.Value);
-                    else if (keyValue.Key == ldr) LowDynamicRange = ReadFloat(keyValue.Value);
-                    else if (keyValue.Key == alpha) Alpha = ReadFloat(keyValue.Value);
-                    else if (keyValue.Key == trans) Transparency = ReadFloat(keyValue.Value);
-                    else if (keyValue.Key == d) Density = ReadFloat(keyValue.Value);
-                    else Debug.LogWarning($"Invalid key={keyValue.Key} value={keyValue.Value}");
+                    else if (key == rough) Roughness = ReadFloat(value);
+                    else if (key == ior) IOR = ReadFloat(value);
+                    else if (key == ri) RI = ReadFloat(value);
+                    else if (key == sp) Specular = ReadFloat(value);
+                    else if (key == metal) Metal = ReadFloat(value);
+                    else if (key == emit) Emission = ReadFloat(value);
+                    else if (key == flux) Flux = ReadFloat(value);
+                    else if (key == ldr) LowDynamicRange = ReadFloat(value);
+                    else if (key == alpha) Alpha = ReadFloat(value);
+                    else if (key == trans) Transparency = ReadFloat(value);
+                    else if (key == d) Density = ReadFloat(value);
+                    else Debug.LogWarning($"Invalid key={key} value={value}");
                 }
             }
         }
@@ -868,7 +939,9 @@ namespace Fluorite.Vox.Editor
                 int size = sizeof(int);
                 size += KeyValueSize(type, LightingType);
                 size += KeyValueSize(I, WriteFloat(Intensity));
-                if (Color.GetHashCode() != default(Color32).GetHashCode()) size += KeyValueSize(color, WriteColor32(Color));
+                // ReSharper disable UsageOfDefaultStructEquality
+                if (!Color.Equals(default(Color32))) size += KeyValueSize(color, WriteColor32(Color));
+                // ReSharper restore UsageOfDefaultStructEquality
                 if (Angle != Vector2.zero) size += KeyValueSize(angle, WriteVector2(Angle));
                 if (Area != 0.0f) size += KeyValueSize(area, WriteFloat(Area));
                 return size;
@@ -886,23 +959,25 @@ namespace Fluorite.Vox.Editor
         {
             for (int i = 0, length = reader.ReadInt32(); i < length; ++i)
             {
-                KeyValuePair<string, string> keyValue = ReadKeyValue(reader);
-                if (keyValue.Key == type) LightingType = keyValue.Value;
-                else if (keyValue.Key == I) Intensity = ReadFloat(keyValue.Value);
-                else if (keyValue.Key == color) Color = ReadColor32(keyValue.Value);
-                else if (keyValue.Key == angle) Angle = ReadVector2(keyValue.Value);
-                else if (keyValue.Key == area) Area = ReadFloat(keyValue.Value);
-                else throw new ArgumentOutOfRangeException($"Invalid key={keyValue.Key} value={keyValue.Value}");
+                ReadKeyValue(reader, out string key, out string value);
+                if (key == type) LightingType = value;
+                else if (key == I) Intensity = ReadFloat(value);
+                else if (key == color) Color = ReadColor32(value);
+                else if (key == angle) Angle = ReadVector2(value);
+                else if (key == area) Area = ReadFloat(value);
+                else throw new ArgumentOutOfRangeException($"Invalid key={key} value={value}");
             }
         }
         protected override void WriteBody(BinaryWriter writer)
         {
-            writer.Write(2 + Count(Color.GetHashCode(), default(Color32).GetHashCode()) + Count(Angle, Vector2.zero) + Count(Area, 0.0f));
+            // ReSharper disable UsageOfDefaultStructEquality
+            writer.Write(2 + Count(Color, default(Color32)) + Count(Angle, Vector2.zero) + Count(Area, 0.0f));
             WriteKeyValue(writer, type, LightingType);
             WriteKeyValue(writer, I, WriteFloat(Intensity));
-            if (Color.GetHashCode() != default(Color32).GetHashCode()) WriteKeyValue(writer, color, WriteColor32(Color));
+            if (!Color.Equals(default(Color32))) WriteKeyValue(writer, color, WriteColor32(Color));
             if (Angle != Vector2.zero) WriteKeyValue(writer, angle, WriteVector2(Angle));
             if (Area != 0.0f) WriteKeyValue(writer, area, WriteFloat(Area));
+            // ReSharper restore UsageOfDefaultStructEquality
         }
         #endregion
     }
@@ -938,12 +1013,12 @@ namespace Fluorite.Vox.Editor
         {
             for (int i = 0, length = reader.ReadInt32(); i < length; ++i)
             {
-                KeyValuePair<string, string> keyValue = ReadKeyValue(reader);
-                if (keyValue.Key == type) AirType = keyValue.Value;
-                else if (keyValue.Key == density) Density = ReadFloat(keyValue.Value);
-                else if (keyValue.Key == color) Color = ReadColor32(keyValue.Value);
-                else if (keyValue.Key == scatter) Scattering = ReadInt(keyValue.Value) != 0;
-                else throw new ArgumentOutOfRangeException($"Invalid key={keyValue.Key} value={keyValue.Value}");
+                ReadKeyValue(reader, out string key, out string value);
+                if (key == type) AirType = value;
+                else if (key == density) Density = ReadFloat(value);
+                else if (key == color) Color = ReadColor32(value);
+                else if (key == scatter) Scattering = ReadInt(value) != 0;
+                else throw new ArgumentOutOfRangeException($"Invalid key={key} value={value}");
             }
         }
         protected override void WriteBody(BinaryWriter writer)
@@ -994,14 +1069,14 @@ namespace Fluorite.Vox.Editor
         {
             for (int i = 0, length = reader.ReadInt32(); i < length; ++i)
             {
-                KeyValuePair<string, string> keyValue = ReadKeyValue(reader);
-                if (keyValue.Key == fov) Fov = ReadFloat(keyValue.Value);
-                else if (keyValue.Key == dof) Dof = ReadFloat(keyValue.Value);
-                else if (keyValue.Key == exp) Exposure = ReadFloat(keyValue.Value);
-                else if (keyValue.Key == vig) Vignette = ReadFloat(keyValue.Value);
-                else if (keyValue.Key == sg) Stereo = ReadFloat(keyValue.Value);
-                else if (keyValue.Key == gam) Gamma = ReadFloat(keyValue.Value);
-                else throw new ArgumentOutOfRangeException($"Invalid key={keyValue.Key} value={keyValue.Value}");
+                ReadKeyValue(reader, out string key, out string value);
+                if (key == fov) Fov = ReadFloat(value);
+                else if (key == dof) Dof = ReadFloat(value);
+                else if (key == exp) Exposure = ReadFloat(value);
+                else if (key == vig) Vignette = ReadFloat(value);
+                else if (key == sg) Stereo = ReadFloat(value);
+                else if (key == gam) Gamma = ReadFloat(value);
+                else throw new ArgumentOutOfRangeException($"Invalid key={key} value={value}");
             }
         }
         protected override void WriteBody(BinaryWriter writer)
@@ -1048,12 +1123,12 @@ namespace Fluorite.Vox.Editor
         {
             for (int i = 0, length = reader.ReadInt32(); i < length; ++i)
             {
-                KeyValuePair<string, string> keyValue = ReadKeyValue(reader);
-                if (keyValue.Key == type) PostType = keyValue.Value;
-                else if (keyValue.Key == mix) Mix = ReadFloat(keyValue.Value);
-                else if (keyValue.Key == scale) Scale = ReadFloat(keyValue.Value);
-                else if (keyValue.Key == threshold) Threshold = ReadFloat(keyValue.Value);
-                else throw new ArgumentOutOfRangeException($"Invalid key={keyValue.Key} value={keyValue.Value}");
+                ReadKeyValue(reader, out string key, out string value);
+                if (key == type) PostType = value;
+                else if (key == mix) Mix = ReadFloat(value);
+                else if (key == scale) Scale = ReadFloat(value);
+                else if (key == threshold) Threshold = ReadFloat(value);
+                else throw new ArgumentOutOfRangeException($"Invalid key={key} value={value}");
             }
         }
         protected override void WriteBody(BinaryWriter writer)
@@ -1095,11 +1170,11 @@ namespace Fluorite.Vox.Editor
         {
             for (int i = 0, length = reader.ReadInt32(); i < length; ++i)
             {
-                KeyValuePair<string, string> keyValue = ReadKeyValue(reader);
-                if (keyValue.Key == gdColor) Ground = ReadColor32(keyValue.Value);
-                else if (keyValue.Key == bgColor) Background = ReadColor32(keyValue.Value);
-                else if (keyValue.Key == edgeColor) Edge = ReadColor32(keyValue.Value);
-                else throw new ArgumentOutOfRangeException($"Invalid key={keyValue.Key} value={keyValue.Value}");
+                ReadKeyValue(reader, out string key, out string value);
+                if (key == gdColor) Ground = ReadColor32(value);
+                else if (key == bgColor) Background = ReadColor32(value);
+                else if (key == edgeColor) Edge = ReadColor32(value);
+                else throw new ArgumentOutOfRangeException($"Invalid key={key} value={value}");
             }
         }
         protected override void WriteBody(BinaryWriter writer)
@@ -1123,7 +1198,7 @@ namespace Fluorite.Vox.Editor
         public const int maxColors = RgbaChunk.maxColors;
 
         #region Properties
-        protected override int NumBytes => maxColors * Marshal.SizeOf<int>();
+        protected override int NumBytes => maxColors;
         public byte[] Index { get; private set; } = new byte[maxColors];
         #endregion
 
@@ -1146,9 +1221,8 @@ namespace Fluorite.Vox.Editor
         #region Constructors
         public Vox(string path)
         {
-            BinaryReader reader = new(new FileStream(path, FileMode.Open, FileAccess.Read));
+            using BinaryReader reader = new(File.OpenRead(path));
             Read(reader);
-            reader.Close();
         }
         #endregion
 
